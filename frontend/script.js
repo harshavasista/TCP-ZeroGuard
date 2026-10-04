@@ -1,4 +1,4 @@
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "https://tcp-zeroguard.onrender.com";
 const ANALYSIS_URL = `${API_BASE}/api/analysis`;
 const START_CAPTURE_URL = `${API_BASE}/api/start-capture`;
 let ANALYSIS = null;
