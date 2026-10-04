@@ -24,21 +24,12 @@ except ImportError:
 # TCP-ZeroGuard FastAPI Backend
 # ============================================================
 
+
 app = FastAPI(
     title="TCP-ZeroGuard API",
     description="Automatic TCP receive-window stall capture and analysis",
     version="1.0.0"
 )
-
-
-# ============================================================
-# CORS
-# ============================================================
-
-
-# ============================================================
-# CORS
-# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,6 +42,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 
