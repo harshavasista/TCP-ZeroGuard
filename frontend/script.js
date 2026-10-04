@@ -38,9 +38,12 @@ async function loadAnalysis() {
    RUN AUTOMATIC CAPTURE AND ANALYSIS THROUGH FASTAPI
    ============================================================ */
 
-async function runAnalysis() {
+async function runAnalysis(pauseSeconds) {
   try {
-    const response = await fetch(START_CAPTURE_URL, {
+    const url = pauseSeconds
+      ? `${START_CAPTURE_URL}?pause_seconds=${encodeURIComponent(pauseSeconds)}`
+      : START_CAPTURE_URL;
+    const response = await fetch(url, {
       method: "POST",
       cache: "no-store",
       headers: {
@@ -635,6 +638,25 @@ function renderCascades() {
     },
     { label: "Window reopened — 4096 bytes", tone: "ok" }
   ]);
+
+  // Update recovery time (longest stall) and current state
+  const maxStall = ANALYSIS.metrics.maximumStallDuration || 0;
+  const isStalled = ANALYSIS.state?.currentlyStalled || false;
+
+  const recoveryTimeEl = document.getElementById("recovery-time-value");
+  if (recoveryTimeEl) {
+    recoveryTimeEl.textContent = maxStall.toFixed(3) + "s";
+  }
+
+  const stateChipEl = document.querySelector(".recovery-state .state-chip");
+  const stateLabelEl = document.querySelector(".recovery-state .foot-label");
+  if (stateChipEl) {
+    stateChipEl.textContent = isStalled ? "Zero window" : "Window open";
+    stateChipEl.className = "state-chip " + (isStalled ? "state-chip-alert" : "state-chip-ok");
+  }
+  if (stateLabelEl) {
+    stateLabelEl.textContent = "Current state at end of capture";
+  }
 }
 
 /* ============================================================
@@ -1390,6 +1412,7 @@ function initNav() {
 
 function initAnalyzeButton() {
   const button = document.getElementById("analyze-btn");
+  const pauseSelect = document.getElementById("pause-select");
 
   if (!button) {
     return;
@@ -1401,6 +1424,7 @@ function initAnalyzeButton() {
     }
 
     const original = button.innerHTML;
+    const pauseSeconds = pauseSelect ? pauseSelect.value : "";
 
     clearAnalysisView(
       "A fresh capture is running. Results will appear when it completes.",
@@ -1435,7 +1459,7 @@ function initAnalyzeButton() {
         "Starting TCP-ZeroGuard automatic capture and analysis..."
       );
 
-      const result = await runAnalysis();
+      const result = await runAnalysis(pauseSeconds);
 
       if (result.success) {
         console.log(

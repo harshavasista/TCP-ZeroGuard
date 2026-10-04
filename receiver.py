@@ -1,6 +1,7 @@
 import socket
 import time
 import argparse
+import os
 
 parser = argparse.ArgumentParser(description="TCP-ZeroGuard receiver test")
 parser.add_argument("--pause-seconds", type=float, nargs="+", default=[10.0, 10.0])
@@ -19,6 +20,11 @@ server.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
 
 server.bind((HOST, PORT))
 server.listen(1)
+
+print(f"Receiver PID: {os.getpid()}")
+print(f"Pause schedule: {list(args.pause_seconds)}")
+print(f"Stall cycles: {STALL_CYCLES}")
+print(f"Recovery read seconds: {RECOVERY_READ_SECONDS}")
 
 print("Waiting for sender...")
 

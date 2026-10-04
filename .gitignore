@@ -1,12 +1,23 @@
-# Packet captures
-capture/*.pcap
-capture/*.pcapng
-
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
-
-# Virtual environments and secrets
 .venv/
 venv/
+env/
+
+# Secrets
 .env
+.env.*
+!.env.example
+
+# Temporary capture files
+results/.capture.lock
+*.pcap
+*.pcapng
+
+# Generated analysis results and logs
+results/analysis_*.json
+results/analysis.json
+results/latest_run.json
+results/scenario_state.json
+results/*_last_run.log

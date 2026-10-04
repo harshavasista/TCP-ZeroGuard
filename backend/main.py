@@ -1,15 +1,17 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
+import socket
+import time
+import argparse
 import json
 import subprocess
 import sys
 import os
 import re
-import time
 import threading
 import uuid
-from fastapi import Query
+import random
+from pathlib import Path
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 try:
     import msvcrt
@@ -404,7 +406,7 @@ def get_analysis():
 # ============================================================
 
 @app.post("/api/start-capture")
-def start_capture(pause_seconds: float | None = Query(default=None, ge=0.1, le=25.0)):
+def start_capture(pause_seconds: str | None = Query(default=None)):
 
     global CURRENT_PCAP_FILE, CURRENT_ANALYSIS_FILE
 
@@ -421,7 +423,19 @@ def start_capture(pause_seconds: float | None = Query(default=None, ge=0.1, le=2
     if pause_seconds is None:
         pause_schedule, scenario_index = next_pause_schedule()
     else:
-        pause_schedule = (pause_seconds, pause_seconds)
+        if isinstance(pause_seconds, str) and ',' in pause_seconds:
+            pause_schedule = tuple(float(x.strip()) for x in pause_seconds.split(','))
+        else:
+            # Single value: expand to two varied pauses averaging the target
+            # e.g., 15 -> (12, 18), 10 -> (8, 12), 5 -> (4, 6)
+            target = float(pause_seconds)
+            variation = target * 0.2  # ±20%
+            pause1 = round(target - variation + random.random() * variation * 2, 1)
+            pause2 = round(target - variation + random.random() * variation * 2, 1)
+            # Ensure minimum 0.1s
+            pause1 = max(0.1, pause1)
+            pause2 = max(0.1, pause2)
+            pause_schedule = (pause1, pause2)
         scenario_index = None
     save_run_state("running", run_id)
 
@@ -482,6 +496,7 @@ def start_capture(pause_seconds: float | None = Query(default=None, ge=0.1, le=2
         )
 
         # ----------------------------------------------------
+        capture_start_time = time.time()
         # ----------------------------------------------------
         # START DUMPCAP
         # ----------------------------------------------------
@@ -491,7 +506,13 @@ def start_capture(pause_seconds: float | None = Query(default=None, ge=0.1, le=2
         print("       TCP-ZeroGuard AUTOMATIC TEST")
         print("========================================")
         print()
+        print(f"Test ID (run_id)       : {run_id}")
+        print(f"Pause schedule (sec)   : {list(pause_schedule)}")
+        print(f"Scenario index         : {scenario_index}")
+        print(f"PCAP output file       : {pcap_file}")
+        print(f"Analysis output file   : {analysis_file}")
 
+        print()
         print("Dumpcap:")
         print(dumpcap_path)
 
@@ -547,6 +568,7 @@ def start_capture(pause_seconds: float | None = Query(default=None, ge=0.1, le=2
             )
 
         print("Packet capture started.")
+        print(f"Capture started at       : {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(capture_start_time))}")
 
         # ----------------------------------------------------
         # START RECEIVER
@@ -700,6 +722,7 @@ def start_capture(pause_seconds: float | None = Query(default=None, ge=0.1, le=2
         print()
         print("Stopping packet capture...")
 
+        capture_end_time = time.time()
         if capture_process.poll() is None:
 
             capture_process.terminate()
@@ -717,6 +740,8 @@ def start_capture(pause_seconds: float | None = Query(default=None, ge=0.1, le=2
                 capture_process.wait()
 
         print("Packet capture stopped.")
+        print(f"Capture ended at         : {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(capture_end_time))}")
+        print(f"Capture duration         : {capture_end_time - capture_start_time:.2f} sec")
 
         # ----------------------------------------------------
         # VERIFY PCAP
@@ -746,7 +771,10 @@ def start_capture(pause_seconds: float | None = Query(default=None, ge=0.1, le=2
 
         print()
         print("Running TCP-ZeroGuard analyzer...")
+        print(f"Analyzer input PCAP      : {pcap_file}")
+        print(f"Analyzer output JSON     : {analysis_file}")
 
+        analyzer_start_time = time.time()
         analyzer_result = subprocess.run(
             [
                 sys.executable,
@@ -761,6 +789,7 @@ def start_capture(pause_seconds: float | None = Query(default=None, ge=0.1, le=2
             text=True,
             timeout=120
         )
+        analyzer_end_time = time.time()
 
         if analyzer_result.returncode != 0:
 
@@ -771,6 +800,8 @@ def start_capture(pause_seconds: float | None = Query(default=None, ge=0.1, le=2
                 f"STDERR:\n"
                 f"{analyzer_result.stderr}"
             )
+
+        print(f"Analyzer completed in    : {analyzer_end_time - analyzer_start_time:.2f} sec")
 
         # ----------------------------------------------------
         # VERIFY ANALYSIS
@@ -799,28 +830,48 @@ def start_capture(pause_seconds: float | None = Query(default=None, ge=0.1, le=2
         print()
 
         print(
-            f"PCAP packets : "
+            f"PCAP packets           : "
             f"{analysis.get('capture', {}).get('total_packets', 0)}"
         )
 
         print(
-            f"Zero windows : "
+            f"Zero window packets    : "
             f"{analysis.get('events', {}).get('zero_window_packets', 0)}"
         )
 
         print(
-            f"Stall episodes : "
+            f"Stall episodes         : "
             f"{analysis.get('events', {}).get('stall_episodes', 0)}"
         )
 
         print(
-            f"Probes : "
+            f"Confirmed probes       : "
             f"{analysis.get('events', {}).get('confirmed_probes', 0)}"
         )
 
         print(
-            f"Recoveries : "
+            f"Probe responses        : "
+            f"{analysis.get('events', {}).get('probe_responses', 0)}"
+        )
+
+        print(
+            f"Recovery episodes      : "
             f"{analysis.get('events', {}).get('recovery_episodes', 0)}"
+        )
+
+        print(
+            f"Total stall duration   : "
+            f"{analysis.get('metrics', {}).get('total_stall_duration_sec', 0):.3f} sec"
+        )
+
+        print(
+            f"Maximum stall duration : "
+            f"{analysis.get('metrics', {}).get('maximum_stall_duration_sec', 0):.3f} sec"
+        )
+
+        print(
+            f"Average stall duration : "
+            f"{analysis.get('metrics', {}).get('average_stall_duration_sec', 0):.3f} sec"
         )
 
         print()

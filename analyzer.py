@@ -8,7 +8,7 @@ DEFAULT_PCAP_FILE = os.path.join(PROJECT_ROOT, "capture", "tcp_zero_window.pcapn
 DEFAULT_RESULT_FILE = os.path.join(PROJECT_ROOT, "results", "analysis.json")
 SERVER_PORT = 5000
 MIN_STALL_DURATION_SEC = 0.001
-RECOVERY_DEBOUNCE_SEC = 0.050
+RECOVERY_DEBOUNCE_SEC = 0.050  # 50 ms debounce to confirm window recovery (avoids false splits from transient updates)
 
 parser = argparse.ArgumentParser(description="Analyze a TCP-ZeroGuard packet capture.")
 parser.add_argument("--pcap", default=DEFAULT_PCAP_FILE, help="PCAP file to analyze")
@@ -21,6 +21,9 @@ RESULT_FILE = args.output
 # ---------------------------------------------------------
 # LOAD CAPTURE
 # ---------------------------------------------------------
+
+print(f"Analyzer input PCAP : {PCAP_FILE}")
+print(f"Analyzer output JSON: {RESULT_FILE}")
 
 packets = rdpcap(PCAP_FILE)
 

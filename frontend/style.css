@@ -120,6 +120,16 @@ input{font-family:inherit;}
   padding:6px 12px; border:1px solid var(--line); border-radius:20px;
 }
 
+.pause-select{
+  background:var(--panel); color:var(--text);
+  border:1px solid var(--line); border-radius:var(--radius);
+  padding:8px 12px; font-size:12.5px; font-weight:500;
+  min-width:140px; cursor:pointer;
+  transition:border-color .15s ease;
+}
+.pause-select:hover{border-color:var(--response);}
+.pause-select:focus{outline:none; border-color:var(--response); box-shadow:0 0 0 2px var(--response-soft);}
+
 .btn-primary{
   display:flex; align-items:center; gap:7px;
   background:var(--response); color:#0A0E14;
@@ -130,6 +140,8 @@ input{font-family:inherit;}
 .btn-primary:hover{filter:brightness(1.1);}
 .btn-primary:active{transform:translateY(1px);}
 .btn-primary.is-running{filter:brightness(.85); cursor:progress;}
+.btn-primary.is-running svg{animation:spin 1s linear infinite; transform-origin:center; transform-box:fill-box;}
+@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
 
 .content{padding:26px 28px 48px; max-width:1180px;}
 

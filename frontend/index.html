@@ -70,6 +70,11 @@
       </div>
       <div class="topbar-actions">
         <div class="capture-pill"><span class="dot dot-alert"></span><span class="capture-status">Checking backend</span></div>
+        <select class="pause-select" id="pause-select" title="Pause duration in seconds. Each run varies ±20% for different results.">
+          <option value="5">5s (varies ~4-6s)</option>
+          <option value="10">10s (varies ~8-12s)</option>
+          <option value="15">15s (varies ~12-18s)</option>
+        </select>
         <button class="btn-primary" id="analyze-btn">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 2v5.2M8 2 5.4 4.6M8 2l2.6 2.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 9.5v2.8c0 .94.76 1.7 1.7 1.7h6.6c.94 0 1.7-.76 1.7-1.7V9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           Analyze PCAP
@@ -143,12 +148,12 @@
           <div class="cascade cascade-recovery" id="cascade-recovery"></div>
           <div class="recovery-foot">
             <div class="recovery-time">
-              <span class="recovery-time-value">9.969s</span>
+              <span class="recovery-time-value" id="recovery-time-value">9.969s</span>
               <span class="recovery-time-label">time to recovery</span>
             </div>
             <div class="recovery-state">
               <span class="foot-label">Current state at end of capture</span>
-              <span class="state-chip state-chip-alert">Zero window</span>
+              <span class="state-chip state-chip-alert" id="recovery-state-chip">Zero window</span>
             </div>
           </div>
         </div>
