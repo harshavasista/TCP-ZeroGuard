@@ -11,9 +11,16 @@ async function loadAnalysis() {
   try {
     const response = await fetch(ANALYSIS_URL, { cache: "no-store" });
 
-    if (!response.ok) {
-      throw new Error(`FastAPI returned HTTP ${response.status}`);
-    }
+    if (response.status === 404) {
+    // Backend is reachable, but no analysis is available yet.
+    ANALYSIS = null;
+    updateBackendStatus(true);
+    return;
+}
+
+if (!response.ok) {
+    throw new Error(`FastAPI returned HTTP ${response.status}`);
+}
 
     const data = await response.json();
     if (!data || typeof data !== "object" || Array.isArray(data)) {
