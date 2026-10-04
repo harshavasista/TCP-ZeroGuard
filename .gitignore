@@ -1,0 +1,12 @@
+# Packet captures
+capture/*.pcap
+capture/*.pcapng
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments and secrets
+.venv/
+venv/
+.env

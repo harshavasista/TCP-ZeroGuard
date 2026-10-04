@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TCP-ZeroGuard — Flow Control Analyzer</title>
+<link rel="stylesheet" href="style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <svg class="brand-mark" width="26" height="26" viewBox="0 0 26 26" fill="none">
+        <rect x="1" y="1" width="24" height="24" rx="3" stroke="currentColor" stroke-width="1.6"/>
+        <path d="M6 13h4l2-6 3 12 2-6h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="brand-text"><span class="brand-dim">TCP</span>ZeroGuard</div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item active" data-page="dashboard">
+        <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="2.5" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="2.5" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="2.5" y="11.5" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="11.5" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/></svg>
+        <span>Dashboard</span>
+      </button>
+      <button class="nav-item" data-page="connection">
+        <svg viewBox="0 0 20 20" fill="none"><circle cx="4" cy="10" r="2.4" stroke="currentColor" stroke-width="1.5"/><circle cx="16" cy="10" r="2.4" stroke="currentColor" stroke-width="1.5"/><path d="M6.4 10h7.2" stroke="currentColor" stroke-width="1.5" stroke-dasharray="1.8 1.8"/></svg>
+        <span>TCP Connection</span>
+      </button>
+      <button class="nav-item" data-page="timeline">
+        <svg viewBox="0 0 20 20" fill="none"><path d="M4 10h12" stroke="currentColor" stroke-width="1.5"/><circle cx="4" cy="10" r="1.6" fill="currentColor"/><circle cx="10" cy="10" r="1.6" fill="currentColor"/><circle cx="16" cy="10" r="1.6" fill="currentColor"/></svg>
+        <span>Event Timeline</span>
+      </button>
+      <button class="nav-item" data-page="stall">
+        <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10.5" r="6.5" stroke="currentColor" stroke-width="1.5"/><path d="M10 6.8v3.8l2.6 1.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M7.5 2.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <span>Stall Analysis</span>
+      </button>
+      <button class="nav-item" data-page="packets">
+        <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="4" width="15" height="12" rx="1.2" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 8h15M7.5 8v8" stroke="currentColor" stroke-width="1.5"/></svg>
+        <span>Packet Events</span>
+      </button>
+      <button class="nav-item" data-page="pcap">
+        <svg viewBox="0 0 20 20" fill="none"><path d="M5 2.5h6.5L15 6v11.5H5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M11.5 2.5V6H15" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        <span>PCAP Analysis</span>
+      </button>
+      <button class="nav-item" data-page="settings">
+        <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 3v1.6M10 15.4V17M3 10h1.6M15.4 10H17M5.1 5.1l1.15 1.15M13.75 13.75 14.9 14.9M14.9 5.1l-1.15 1.15M6.25 13.75 5.1 14.9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <span>Settings</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="foot-label">System status</div>
+      <div class="foot-status"><span class="dot dot-ok"></span><span class="foot-text">Analyzer ready</span></div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <div class="main">
+
+    <header class="topbar">
+      <div class="topbar-title">
+        <h1 id="page-title">Dashboard</h1>
+        <p id="page-subtitle">TCP receive-window monitoring</p>
+      </div>
+      <div class="topbar-actions">
+        <div class="capture-pill"><span class="dot dot-alert"></span><span class="capture-status">Checking backend</span></div>
+        <button class="btn-primary" id="analyze-btn">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 2v5.2M8 2 5.4 4.6M8 2l2.6 2.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 9.5v2.8c0 .94.76 1.7 1.7 1.7h6.6c.94 0 1.7-.76 1.7-1.7V9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          Analyze PCAP
+        </button>
+      </div>
+    </header>
+
+    <main class="content">
+
+      <!-- ============ PAGE: DASHBOARD ============ -->
+      <section class="page active" id="page-dashboard">
+
+        <div class="hero">
+          <div class="hero-top">
+            <div class="hero-heading">
+              <span class="hero-kicker">TCP flow status</span>
+              <h2 id="hero-state">Currently stalled</h2>
+              <p>Receiver advertised a zero TCP receive window. The sender has halted normal segment transmission and is holding unacknowledged data.</p>
+            </div>
+            <div class="hero-badge" id="hero-badge">
+              <span class="pulse-ring"></span>
+              <span class="pulse-dot"></span>
+              STALLED
+            </div>
+          </div>
+
+          <div class="channel">
+            <div class="channel-node">
+              <div class="channel-node-label">Sender</div>
+              <div class="channel-node-addr">127.0.0.1:64410</div>
+            </div>
+
+            <div class="channel-mid">
+              <div class="channel-line">
+                <div class="channel-line-fill" id="channel-fill"></div>
+              </div>
+              <div class="channel-gauge">
+                <div class="gauge-track"><div class="gauge-level" id="gauge-level"></div></div>
+                <div class="gauge-readout"><span id="gauge-value">0</span> B window</div>
+              </div>
+              <div class="channel-proto">TCP</div>
+            </div>
+
+            <div class="channel-node channel-node-right">
+              <div class="channel-node-label">Receiver</div>
+              <div class="channel-node-addr">127.0.0.1:5000</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="metric-grid" id="metric-grid"></div>
+
+      </section>
+
+      <!-- ============ PAGE: TCP CONNECTION ============ -->
+      <section class="page" id="page-connection">
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Zero-window cascade</h3>
+            <p>How a full receiver buffer halts and restarts a TCP sender.</p>
+          </div>
+          <div class="cascade" id="cascade-flow"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Recovery sequence</h3>
+            <p>Probe-and-response cycle that reopened the window after the longest recorded stall.</p>
+          </div>
+          <div class="cascade cascade-recovery" id="cascade-recovery"></div>
+          <div class="recovery-foot">
+            <div class="recovery-time">
+              <span class="recovery-time-value">9.969s</span>
+              <span class="recovery-time-label">time to recovery</span>
+            </div>
+            <div class="recovery-state">
+              <span class="foot-label">Current state at end of capture</span>
+              <span class="state-chip state-chip-alert">Zero window</span>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ============ PAGE: EVENT TIMELINE ============ -->
+      <section class="page" id="page-timeline">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Event timeline</h3>
+            <p>Chronological packet events, from the first zero-window advertisement to the final unresolved stall.</p>
+          </div>
+          <div class="legend" id="timeline-legend"></div>
+          <div class="timeline" id="timeline-list"></div>
+        </div>
+      </section>
+
+      <!-- ============ PAGE: STALL ANALYSIS ============ -->
+      <section class="page" id="page-stall">
+
+        <div class="stat-row" id="stall-stats"></div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Stall episodes vs. duration</h3>
+            <p>Episode 1 is the dominant stall in this capture — the rest are brief buffer flaps.</p>
+          </div>
+          <div class="chart" id="stall-chart"></div>
+        </div>
+
+      </section>
+
+      <!-- ============ PAGE: PACKET EVENTS ============ -->
+      <section class="page" id="page-packets">
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Packet event log</h3>
+            <p>Every zero-window, probe, response and recovery packet captured.</p>
+          </div>
+
+          <div class="table-controls">
+            <div class="search-field">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.4" stroke="currentColor" stroke-width="1.4"/><path d="M13 13l-2.6-2.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              <input type="text" id="packet-search" placeholder="Search packet, SEQ, ACK, event type…">
+            </div>
+            <div class="filter-chips" id="event-filters"></div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="packet-table">
+              <thead>
+                <tr>
+                  <th>Packet</th><th>Event</th><th>Window</th><th>SEQ</th><th>ACK</th><th>Payload</th><th title="Timing varies by event: stall duration, probe interval, or probe response time; calculated from packet timestamps.">Duration / timing</th>
+                </tr>
+              </thead>
+              <tbody id="packet-table-body"></tbody>
+            </table>
+          </div>
+
+          <div class="table-foot">
+            <span id="table-count">— rows</span>
+            <div class="pager">
+              <button class="pager-btn" id="pager-prev" disabled>‹ Prev</button>
+              <span id="pager-label">Page 1</span>
+              <button class="pager-btn" id="pager-next">Next ›</button>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ============ PAGE: PCAP ANALYSIS ============ -->
+      <section class="page" id="page-pcap">
+
+        <div class="panel pcap-panel">
+          <div class="panel-head">
+            <h3>Capture summary</h3>
+            <p>Source file and analyzer output for this session.</p>
+          </div>
+          <div class="pcap-grid" id="pcap-grid"></div>
+
+          <div class="pcap-progress">
+            <div class="pcap-progress-head">
+              <span>Analysis status</span>
+              <span class="state-chip state-chip-ok">Completed</span>
+            </div>
+            <div class="pcap-progress-track"><div class="pcap-progress-fill"></div></div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ============ PAGE: SETTINGS ============ -->
+      <section class="page" id="page-settings">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Analyzer settings</h3>
+            <p>These controls will take effect once the FastAPI backend is connected.</p>
+          </div>
+          <div class="settings-list">
+            <div class="settings-row">
+              <div>
+                <div class="settings-row-title">Live capture polling</div>
+                <div class="settings-row-sub">Re-check analysis.json for new events</div>
+              </div>
+              <label class="switch"><input type="checkbox" disabled><span class="switch-track"></span></label>
+            </div>
+            <div class="settings-row">
+              <div>
+                <div class="settings-row-title">Stall alert threshold</div>
+                <div class="settings-row-sub">Flag stalls longer than 2.0s</div>
+              </div>
+              <div class="settings-value">2.0s</div>
+            </div>
+            <div class="settings-row">
+              <div>
+                <div class="settings-row-title">Interface theme</div>
+                <div class="settings-row-sub">Dark, tuned for lab and lecture-hall projectors</div>
+              </div>
+              <div class="settings-value">Dark</div>
+            </div>
+            <div class="settings-row">
+              <div>
+                <div class="settings-row-title">Backend endpoint</div>
+                <div class="settings-row-sub">FastAPI analysis service</div>
+              </div>
+              <div class="settings-value settings-mono">not connected</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script src="script.js"></script>
+</body>
+</html>

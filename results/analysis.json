@@ -1,0 +1,358 @@
+{
+    "project": "TCP-ZeroGuard",
+    "connection": {
+        "sender": {
+            "ip": "127.0.0.1",
+            "port": 52810
+        },
+        "receiver": {
+            "ip": "127.0.0.1",
+            "port": 5000
+        }
+    },
+    "capture": {
+        "total_packets": 3838,
+        "tcp_packets": 3838
+    },
+    "events": {
+        "zero_window_packets": 15,
+        "stall_episodes": 10,
+        "confirmed_probes": 5,
+        "probe_responses": 5,
+        "recovery_episodes": 9
+    },
+    "metrics": {
+        "total_stall_duration_sec": 9.969,
+        "maximum_stall_duration_sec": 9.969,
+        "average_stall_duration_sec": 1.108
+    },
+    "state": {
+        "stall_detected": true,
+        "recovery_detected": true,
+        "currently_stalled": true
+    },
+    "timeline": [
+        {
+            "packet": 957,
+            "event": "ZERO_WINDOW_START",
+            "timestamp_sec": 1790914204.1918235,
+            "window": 0,
+            "seq": 761314929,
+            "ack": 1254329864,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914204.1918235,
+            "stall_duration": 9.968583822250366
+        },
+        {
+            "packet": 958,
+            "event": "ZERO_WINDOW_PROBE",
+            "timestamp_sec": 1790914204.5075936,
+            "seq": 1254329864,
+            "ack": 761314929,
+            "window": 255,
+            "payload_length": 1,
+            "probe_interval_sec": 0.31577014923095703
+        },
+        {
+            "packet": 959,
+            "event": "PROBE_RESPONSE",
+            "timestamp_sec": 1790914204.5076306,
+            "probe_timestamp_sec": 1790914204.5075936,
+            "seq": 761314929,
+            "ack": 1254329864,
+            "window": 0,
+            "payload_length": 0,
+            "probe_response_latency_sec": 3.695487976074219e-05
+        },
+        {
+            "packet": 960,
+            "event": "ZERO_WINDOW_PROBE",
+            "timestamp_sec": 1790914205.110543,
+            "seq": 1254329864,
+            "ack": 761314929,
+            "window": 255,
+            "payload_length": 1,
+            "probe_interval_sec": 0.6029493808746338
+        },
+        {
+            "packet": 961,
+            "event": "PROBE_RESPONSE",
+            "timestamp_sec": 1790914205.110583,
+            "probe_timestamp_sec": 1790914205.110543,
+            "seq": 761314929,
+            "ack": 1254329864,
+            "window": 0,
+            "payload_length": 0,
+            "probe_response_latency_sec": 4.00543212890625e-05
+        },
+        {
+            "packet": 962,
+            "event": "ZERO_WINDOW_PROBE",
+            "timestamp_sec": 1790914206.3216462,
+            "seq": 1254329864,
+            "ack": 761314929,
+            "window": 255,
+            "payload_length": 1,
+            "probe_interval_sec": 1.2111032009124756
+        },
+        {
+            "packet": 963,
+            "event": "PROBE_RESPONSE",
+            "timestamp_sec": 1790914206.3216698,
+            "probe_timestamp_sec": 1790914206.3216462,
+            "seq": 761314929,
+            "ack": 1254329864,
+            "window": 0,
+            "payload_length": 0,
+            "probe_response_latency_sec": 2.3603439331054688e-05
+        },
+        {
+            "packet": 964,
+            "event": "ZERO_WINDOW_PROBE",
+            "timestamp_sec": 1790914208.7235026,
+            "seq": 1254329864,
+            "ack": 761314929,
+            "window": 255,
+            "payload_length": 1,
+            "probe_interval_sec": 2.4018564224243164
+        },
+        {
+            "packet": 965,
+            "event": "PROBE_RESPONSE",
+            "timestamp_sec": 1790914208.7235396,
+            "probe_timestamp_sec": 1790914208.7235026,
+            "seq": 761314929,
+            "ack": 1254329864,
+            "window": 0,
+            "payload_length": 0,
+            "probe_response_latency_sec": 3.695487976074219e-05
+        },
+        {
+            "packet": 966,
+            "event": "ZERO_WINDOW_PROBE",
+            "timestamp_sec": 1790914213.5355175,
+            "seq": 1254329864,
+            "ack": 761314929,
+            "window": 255,
+            "payload_length": 1,
+            "probe_interval_sec": 4.812014818191528
+        },
+        {
+            "packet": 967,
+            "event": "PROBE_RESPONSE",
+            "timestamp_sec": 1790914213.5355542,
+            "probe_timestamp_sec": 1790914213.5355175,
+            "seq": 761314929,
+            "ack": 1254329864,
+            "window": 0,
+            "payload_length": 0,
+            "probe_response_latency_sec": 3.6716461181640625e-05
+        },
+        {
+            "packet": 968,
+            "event": "WINDOW_REOPENED",
+            "timestamp_sec": 1790914214.1604073,
+            "window": 4096,
+            "seq": 761314929,
+            "ack": 1254329864,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914204.1918235,
+            "recovery_timestamp_sec": 1790914214.1604073,
+            "stall_duration": 9.968583822250366
+        },
+        {
+            "packet": 972,
+            "event": "ZERO_WINDOW_START",
+            "timestamp_sec": 1790914214.160558,
+            "window": 0,
+            "seq": 761314929,
+            "ack": 1254338056,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.160558,
+            "stall_duration": 8.058547973632812e-05
+        },
+        {
+            "packet": 973,
+            "event": "WINDOW_REOPENED",
+            "timestamp_sec": 1790914214.1606386,
+            "window": 4096,
+            "seq": 761314929,
+            "ack": 1254338056,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.160558,
+            "recovery_timestamp_sec": 1790914214.1606386,
+            "stall_duration": 8.058547973632812e-05
+        },
+        {
+            "packet": 977,
+            "event": "ZERO_WINDOW_START",
+            "timestamp_sec": 1790914214.1607294,
+            "window": 0,
+            "seq": 761314929,
+            "ack": 1254346248,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.1607294,
+            "stall_duration": 5.507469177246094e-05
+        },
+        {
+            "packet": 978,
+            "event": "WINDOW_REOPENED",
+            "timestamp_sec": 1790914214.1607845,
+            "window": 4096,
+            "seq": 761314929,
+            "ack": 1254346248,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.1607294,
+            "recovery_timestamp_sec": 1790914214.1607845,
+            "stall_duration": 5.507469177246094e-05
+        },
+        {
+            "packet": 982,
+            "event": "ZERO_WINDOW_START",
+            "timestamp_sec": 1790914214.160846,
+            "window": 0,
+            "seq": 761314929,
+            "ack": 1254354440,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.160846,
+            "stall_duration": 4.38690185546875e-05
+        },
+        {
+            "packet": 983,
+            "event": "WINDOW_REOPENED",
+            "timestamp_sec": 1790914214.1608899,
+            "window": 4096,
+            "seq": 761314929,
+            "ack": 1254354440,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.160846,
+            "recovery_timestamp_sec": 1790914214.1608899,
+            "stall_duration": 4.38690185546875e-05
+        },
+        {
+            "packet": 987,
+            "event": "ZERO_WINDOW_START",
+            "timestamp_sec": 1790914214.1609502,
+            "window": 0,
+            "seq": 761314929,
+            "ack": 1254362632,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.1609502,
+            "stall_duration": 4.363059997558594e-05
+        },
+        {
+            "packet": 988,
+            "event": "WINDOW_REOPENED",
+            "timestamp_sec": 1790914214.1609938,
+            "window": 4096,
+            "seq": 761314929,
+            "ack": 1254362632,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.1609502,
+            "recovery_timestamp_sec": 1790914214.1609938,
+            "stall_duration": 4.363059997558594e-05
+        },
+        {
+            "packet": 992,
+            "event": "ZERO_WINDOW_START",
+            "timestamp_sec": 1790914214.1610594,
+            "window": 0,
+            "seq": 761314929,
+            "ack": 1254370824,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.1610594,
+            "stall_duration": 1.9550323486328125e-05
+        },
+        {
+            "packet": 993,
+            "event": "WINDOW_REOPENED",
+            "timestamp_sec": 1790914214.161079,
+            "window": 4096,
+            "seq": 761314929,
+            "ack": 1254370824,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.1610594,
+            "recovery_timestamp_sec": 1790914214.161079,
+            "stall_duration": 1.9550323486328125e-05
+        },
+        {
+            "packet": 997,
+            "event": "ZERO_WINDOW_START",
+            "timestamp_sec": 1790914214.1611135,
+            "window": 0,
+            "seq": 761314929,
+            "ack": 1254379016,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.1611135,
+            "stall_duration": 2.0742416381835938e-05
+        },
+        {
+            "packet": 998,
+            "event": "WINDOW_REOPENED",
+            "timestamp_sec": 1790914214.1611342,
+            "window": 4096,
+            "seq": 761314929,
+            "ack": 1254379016,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.1611135,
+            "recovery_timestamp_sec": 1790914214.1611342,
+            "stall_duration": 2.0742416381835938e-05
+        },
+        {
+            "packet": 1002,
+            "event": "ZERO_WINDOW_START",
+            "timestamp_sec": 1790914214.1611683,
+            "window": 0,
+            "seq": 761314929,
+            "ack": 1254387208,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.1611683,
+            "stall_duration": 2.7179718017578125e-05
+        },
+        {
+            "packet": 1003,
+            "event": "WINDOW_REOPENED",
+            "timestamp_sec": 1790914214.1611955,
+            "window": 4096,
+            "seq": 761314929,
+            "ack": 1254387208,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.1611683,
+            "recovery_timestamp_sec": 1790914214.1611955,
+            "stall_duration": 2.7179718017578125e-05
+        },
+        {
+            "packet": 1007,
+            "event": "ZERO_WINDOW_START",
+            "timestamp_sec": 1790914214.1612196,
+            "window": 0,
+            "seq": 761314929,
+            "ack": 1254395400,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.1612196,
+            "stall_duration": 1.4066696166992188e-05
+        },
+        {
+            "packet": 1008,
+            "event": "WINDOW_REOPENED",
+            "timestamp_sec": 1790914214.1612337,
+            "window": 4096,
+            "seq": 761314929,
+            "ack": 1254395400,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914214.1612196,
+            "recovery_timestamp_sec": 1790914214.1612337,
+            "stall_duration": 1.4066696166992188e-05
+        },
+        {
+            "packet": 3838,
+            "event": "ZERO_WINDOW_START",
+            "timestamp_sec": 1790914229.171708,
+            "window": 0,
+            "seq": 761314930,
+            "ack": 1260187144,
+            "payload_length": 0,
+            "start_timestamp_sec": 1790914229.171708
+        }
+    ]
+}
