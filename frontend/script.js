@@ -9,7 +9,7 @@ let ANALYSIS = null;
 
 async function loadAnalysis() {
   try {
-    const response = await fetch(ANALYSIS_URL);
+    const response = await fetch(ANALYSIS_URL, { cache: "no-store" });
 
     if (!response.ok) {
       throw new Error(`FastAPI returned HTTP ${response.status}`);
@@ -28,6 +28,7 @@ async function loadAnalysis() {
   } catch (error) {
     console.error("Unable to load analysis:", error);
     updateBackendStatus(false);
+    clearAnalysisView("No completed analysis is available.", "No analysis");
     showBackendError(error);
     return false;
   }
@@ -41,6 +42,7 @@ async function runAnalysis() {
   try {
     const response = await fetch(START_CAPTURE_URL, {
       method: "POST",
+      cache: "no-store",
       headers: {
         "Content-Type": "application/json"
       }
@@ -379,6 +381,65 @@ function showBackendError(error) {
   }
 
   console.error("TCP-ZeroGuard backend error:", error);
+}
+
+function clearAnalysisView(message, status = "No analysis") {
+  ANALYSIS = null;
+  tableRows = [];
+  activeFilter = "all";
+  searchTerm = "";
+  currentPage = 1;
+
+  [
+    "metric-grid",
+    "timeline-list",
+    "timeline-legend",
+    "stall-stats",
+    "stall-chart",
+    "event-filters",
+    "packet-table-body",
+    "pcap-grid"
+  ].forEach(id => {
+    const element = document.getElementById(id);
+    if (element) element.replaceChildren();
+  });
+
+  const state = document.getElementById("hero-state");
+  const description = document.getElementById("hero-description");
+  const badge = document.getElementById("hero-badge");
+  const gauge = document.getElementById("gauge-level");
+  const gaugeValue = document.getElementById("gauge-value");
+  const packetSearch = document.getElementById("packet-search");
+  const tableCount = document.getElementById("table-count");
+  const pager = document.getElementById("pager-label");
+  const captureStatus = document.querySelector(".capture-status");
+  const captureDot = document.querySelector(".capture-pill .dot");
+
+  if (state) state.textContent = "No current analysis";
+  if (description) description.textContent = message;
+  if (badge) badge.textContent = "NO DATA";
+  if (gauge) {
+    gauge.style.width = "0%";
+    gauge.style.background = "";
+  }
+  if (gaugeValue) gaugeValue.textContent = "—";
+  if (packetSearch) packetSearch.value = "";
+  if (tableCount) tableCount.textContent = "0 rows";
+  if (pager) pager.textContent = "Page 0 of 0";
+  if (captureStatus) captureStatus.textContent = status;
+  if (captureDot) {
+    captureDot.classList.remove("dot-ok");
+    captureDot.classList.add("dot-alert");
+  }
+
+  document.querySelectorAll(".channel-node-addr").forEach(element => {
+    element.textContent = "—";
+  });
+
+  ["pager-prev", "pager-next"].forEach(id => {
+    const button = document.getElementById(id);
+    if (button) button.disabled = true;
+  });
 }
 
 /* ============================================================
@@ -1200,12 +1261,19 @@ function renderHero() {
   const stalled = ANALYSIS.state.currentlyStalled;
 
   const state = document.getElementById("hero-state");
+  const description = document.getElementById("hero-description");
   const badge = document.getElementById("hero-badge");
 
   if (state) {
     state.textContent = stalled
       ? "Currently stalled"
       : "Window available";
+  }
+
+  if (description) {
+    description.textContent = stalled
+      ? "Receiver advertised a zero TCP receive window. The sender has halted normal segment transmission and is holding unacknowledged data."
+      : "The receiver has available buffer space and can accept incoming TCP data. Normal data transmission can continue.";
   }
 
   if (badge) {
@@ -1334,6 +1402,11 @@ function initAnalyzeButton() {
 
     const original = button.innerHTML;
 
+    clearAnalysisView(
+      "A fresh capture is running. Results will appear when it completes.",
+      "Capturing..."
+    );
+
     button.classList.add("is-running");
     button.disabled = true;
 
@@ -1371,10 +1444,19 @@ function initAnalyzeButton() {
 
         renderAll();
       } else {
+        clearAnalysisView(
+          "The latest capture failed. No previous results are being shown.",
+          "Capture failed"
+        );
         showAnalysisError(result.error);
       }
     } catch (error) {
       console.error("Capture and analysis failed:", error);
+
+      clearAnalysisView(
+        "The latest capture failed. No previous results are being shown.",
+        "Capture failed"
+      );
 
       showAnalysisError(error);
     } finally {

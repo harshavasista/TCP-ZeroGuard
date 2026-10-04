@@ -7,6 +7,15 @@ import sys
 import os
 import re
 import time
+import threading
+import uuid
+from fastapi import Query
+
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
+    import fcntl
 
 
 # ============================================================
@@ -51,12 +60,23 @@ RESULTS_DIR = PROJECT_ROOT / "results"
 
 PCAP_FILE = CAPTURE_DIR / "tcp_zero_window.pcapng"
 ANALYSIS_FILE = RESULTS_DIR / "analysis.json"
+RUN_STATE_FILE = RESULTS_DIR / "latest_run.json"
+SCENARIO_STATE_FILE = RESULTS_DIR / "scenario_state.json"
+RUN_LOCK_FILE = RESULTS_DIR / ".capture.lock"
+CURRENT_PCAP_FILE = None
+CURRENT_ANALYSIS_FILE = None
+RUN_LOCK = threading.Lock()
 
 DUMPCAP_PATH = Path(
     r"C:\Program Files\Wireshark\dumpcap.exe"
 )
 
 CAPTURE_FILTER = "tcp port 5000"
+DEFAULT_PAUSE_SCHEDULES = (
+    (3.0, 5.0),
+    (5.0, 8.0, 3.0),
+    (4.0, 7.0)
+)
 
 
 # ============================================================
@@ -65,6 +85,123 @@ CAPTURE_FILTER = "tcp port 5000"
 
 CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def acquire_run_lock():
+    if not RUN_LOCK.acquire(blocking=False):
+        return None
+
+    lock_file = None
+    try:
+        lock_file = open(RUN_LOCK_FILE, "a+b")
+        if lock_file.seek(0, os.SEEK_END) == 0:
+            lock_file.write(b"\0")
+            lock_file.flush()
+        lock_file.seek(0)
+
+        if msvcrt is not None:
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        if lock_file is not None:
+            lock_file.close()
+        RUN_LOCK.release()
+        return None
+
+    return lock_file
+
+
+def release_run_lock(lock_file):
+    try:
+        if msvcrt is not None:
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    finally:
+        lock_file.close()
+        RUN_LOCK.release()
+
+
+def save_run_state(status, run_id=None, pcap_file=None, analysis_file=None):
+    state = {"status": status, "run_id": run_id}
+    if pcap_file is not None:
+        state["pcap_file"] = str(pcap_file)
+    if analysis_file is not None:
+        state["analysis_file"] = str(analysis_file)
+
+    temporary_file = RUN_STATE_FILE.with_suffix(".tmp")
+    try:
+        with open(temporary_file, "w", encoding="utf-8") as file:
+            json.dump(state, file)
+        os.replace(temporary_file, RUN_STATE_FILE)
+    except OSError as error:
+        print(f"Unable to save latest-run state: {error}")
+
+
+def next_pause_schedule():
+    try:
+        with open(SCENARIO_STATE_FILE, "r", encoding="utf-8") as file:
+            next_index = int(json.load(file).get("next_index", 0))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        next_index = 0
+
+    scenario_index = next_index % len(DEFAULT_PAUSE_SCHEDULES)
+    schedule = DEFAULT_PAUSE_SCHEDULES[scenario_index]
+    temporary_file = SCENARIO_STATE_FILE.with_suffix(".tmp")
+    try:
+        with open(temporary_file, "w", encoding="utf-8") as file:
+            json.dump({"next_index": next_index + 1}, file)
+        os.replace(temporary_file, SCENARIO_STATE_FILE)
+    except OSError as error:
+        print(f"Unable to save next test scenario: {error}")
+
+    return schedule, scenario_index
+
+
+def load_latest_run_state():
+    global CURRENT_PCAP_FILE, CURRENT_ANALYSIS_FILE
+
+    CURRENT_PCAP_FILE = None
+    CURRENT_ANALYSIS_FILE = None
+
+    if RUN_STATE_FILE.exists():
+        try:
+            with open(RUN_STATE_FILE, "r", encoding="utf-8") as file:
+                state = json.load(file)
+            if state.get("status") != "completed":
+                return
+
+            pcap_file = Path(state.get("pcap_file", ""))
+            analysis_file = Path(state.get("analysis_file", ""))
+            if pcap_file.is_file() and pcap_file.stat().st_size > 24 and analysis_file.is_file():
+                CURRENT_PCAP_FILE = pcap_file
+                CURRENT_ANALYSIS_FILE = analysis_file
+            return
+        except (OSError, ValueError, TypeError):
+            return
+
+    else:
+        completed_runs = []
+        for analysis_file in RESULTS_DIR.glob("analysis_*.json"):
+            run_id = analysis_file.stem[len("analysis_"):]
+            pcap_file = CAPTURE_DIR / f"tcp_zero_window_{run_id}.pcapng"
+            if pcap_file.is_file() and pcap_file.stat().st_size > 24:
+                completed_runs.append((analysis_file.stat().st_mtime, pcap_file, analysis_file))
+
+        if completed_runs:
+            _, CURRENT_PCAP_FILE, CURRENT_ANALYSIS_FILE = max(completed_runs, key=lambda run: run[0])
+            return
+
+    # Backward compatibility for an existing project capture made before
+    # per-run files were introduced.
+    if PCAP_FILE.is_file() and PCAP_FILE.stat().st_size > 24 and ANALYSIS_FILE.is_file():
+        CURRENT_PCAP_FILE = PCAP_FILE
+        CURRENT_ANALYSIS_FILE = ANALYSIS_FILE
+
+
+load_latest_run_state()
 
 
 # ============================================================
@@ -194,9 +331,11 @@ def find_loopback_interface(dumpcap_path):
 # READ ANALYSIS JSON
 # ============================================================
 
-def read_analysis():
+def read_analysis(path=None):
 
-    if not ANALYSIS_FILE.exists():
+    analysis_path = Path(path) if path is not None else ANALYSIS_FILE
+
+    if not analysis_path.exists():
         raise HTTPException(
             status_code=404,
             detail=(
@@ -208,7 +347,7 @@ def read_analysis():
     try:
 
         with open(
-            ANALYSIS_FILE,
+            analysis_path,
             "r",
             encoding="utf-8"
         ) as file:
@@ -254,7 +393,10 @@ def root():
 @app.get("/api/analysis")
 def get_analysis():
 
-    return read_analysis()
+    load_latest_run_state()
+    if CURRENT_ANALYSIS_FILE is None:
+        raise HTTPException(status_code=404, detail="No completed analysis is available.")
+    return read_analysis(CURRENT_ANALYSIS_FILE)
 
 
 # ============================================================
@@ -262,11 +404,33 @@ def get_analysis():
 # ============================================================
 
 @app.post("/api/start-capture")
-def start_capture():
+def start_capture(pause_seconds: float | None = Query(default=None, ge=0.1, le=25.0)):
+
+    global CURRENT_PCAP_FILE, CURRENT_ANALYSIS_FILE
+
+    run_id = f"{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    pcap_file = CAPTURE_DIR / f"tcp_zero_window_{run_id}.pcapng"
+    analysis_file = RESULTS_DIR / f"analysis_{run_id}.json"
+
+    run_lock_file = acquire_run_lock()
+    if run_lock_file is None:
+        raise HTTPException(status_code=409, detail="A capture and analysis run is already in progress.")
+
+    CURRENT_PCAP_FILE = None
+    CURRENT_ANALYSIS_FILE = None
+    if pause_seconds is None:
+        pause_schedule, scenario_index = next_pause_schedule()
+    else:
+        pause_schedule = (pause_seconds, pause_seconds)
+        scenario_index = None
+    save_run_state("running", run_id)
 
     dumpcap_path = find_dumpcap()
 
     if dumpcap_path is None:
+
+        save_run_state("failed", run_id)
+        release_run_lock(run_lock_file)
 
         raise HTTPException(
             status_code=500,
@@ -279,6 +443,9 @@ def start_capture():
 
     if not ANALYZER_FILE.exists():
 
+        save_run_state("failed", run_id)
+        release_run_lock(run_lock_file)
+
         raise HTTPException(
             status_code=404,
             detail="analyzer.py not found."
@@ -286,12 +453,18 @@ def start_capture():
 
     if not SENDER_FILE.exists():
 
+        save_run_state("failed", run_id)
+        release_run_lock(run_lock_file)
+
         raise HTTPException(
             status_code=404,
             detail="sender.py not found."
         )
 
     if not RECEIVER_FILE.exists():
+
+        save_run_state("failed", run_id)
+        release_run_lock(run_lock_file)
 
         raise HTTPException(
             status_code=404,
@@ -309,25 +482,6 @@ def start_capture():
         )
 
         # ----------------------------------------------------
-        # Remove previous capture
-        # ----------------------------------------------------
-
-        if PCAP_FILE.exists():
-
-            try:
-                PCAP_FILE.unlink()
-
-            except PermissionError:
-
-                raise HTTPException(
-                    status_code=500,
-                    detail=(
-                        "Previous PCAP file is currently "
-                        "being used by another program. "
-                        "Close Wireshark and try again."
-                    )
-                )
-
         # ----------------------------------------------------
         # START DUMPCAP
         # ----------------------------------------------------
@@ -351,7 +505,7 @@ def start_capture():
 
         print()
         print("Output:")
-        print(PCAP_FILE)
+        print(pcap_file)
 
         print()
         print("Starting packet capture...")
@@ -367,7 +521,7 @@ def start_capture():
                 CAPTURE_FILTER,
 
                 "-w",
-                str(PCAP_FILE),
+                str(pcap_file),
 
                 "-q"
             ],
@@ -412,7 +566,9 @@ def start_capture():
         receiver_process = subprocess.Popen(
             [
                 sys.executable,
-                str(RECEIVER_FILE)
+                str(RECEIVER_FILE),
+                "--pause-seconds",
+                *[str(duration) for duration in pause_schedule]
             ],
             cwd=str(PROJECT_ROOT),
             stdout=receiver_output,
@@ -566,14 +722,17 @@ def start_capture():
         # VERIFY PCAP
         # ----------------------------------------------------
 
-        if not PCAP_FILE.exists():
+        if not pcap_file.exists():
 
             raise RuntimeError(
                 "Capture finished but the PCAP file "
                 "was not created."
             )
 
-        pcap_size = PCAP_FILE.stat().st_size
+        pcap_size = pcap_file.stat().st_size
+
+        if pcap_size <= 24:
+            raise RuntimeError("The new PCAP capture is empty; refusing to analyze an old result.")
 
         print()
         print(
@@ -591,7 +750,11 @@ def start_capture():
         analyzer_result = subprocess.run(
             [
                 sys.executable,
-                str(ANALYZER_FILE)
+                str(ANALYZER_FILE),
+                "--pcap",
+                str(pcap_file),
+                "--output",
+                str(analysis_file)
             ],
             cwd=str(PROJECT_ROOT),
             capture_output=True,
@@ -613,14 +776,17 @@ def start_capture():
         # VERIFY ANALYSIS
         # ----------------------------------------------------
 
-        if not ANALYSIS_FILE.exists():
+        if not analysis_file.exists():
 
             raise RuntimeError(
                 "Analyzer completed but "
                 "analysis.json was not generated."
             )
 
-        analysis = read_analysis()
+        analysis = read_analysis(analysis_file)
+        CURRENT_PCAP_FILE = pcap_file
+        CURRENT_ANALYSIS_FILE = analysis_file
+        save_run_state("completed", run_id, pcap_file, analysis_file)
 
         # ----------------------------------------------------
         # FINAL RESULT
@@ -664,8 +830,12 @@ def start_capture():
             "capture": {
                 "interface": interface,
                 "filter": CAPTURE_FILTER,
-                "pcap_file": str(PCAP_FILE),
-                "pcap_size_bytes": pcap_size
+                "pcap_file": str(pcap_file),
+                "pcap_size_bytes": pcap_size,
+                "run_id": run_id,
+                "pause_seconds": pause_schedule[0],
+                "pause_schedule_seconds": list(pause_schedule),
+                "scenario_index": scenario_index
             },
             "analysis": analysis,
             "analyzer_output": analyzer_result.stdout
@@ -673,9 +843,13 @@ def start_capture():
 
     except HTTPException:
 
+        save_run_state("failed", run_id)
+
         raise
 
     except Exception as error:
+
+        save_run_state("failed", run_id)
 
         # ----------------------------------------------------
         # CLEANUP IF SOMETHING GOES WRONG
@@ -728,6 +902,9 @@ def start_capture():
             )
         )
 
+    finally:
+        release_run_lock(run_lock_file)
+
 
 # ============================================================
 # MANUAL ANALYZER ENDPOINT
@@ -736,6 +913,8 @@ def start_capture():
 @app.post("/api/analyze")
 def analyze_pcap():
 
+    global CURRENT_ANALYSIS_FILE
+
     if not ANALYZER_FILE.exists():
 
         raise HTTPException(
@@ -743,7 +922,13 @@ def analyze_pcap():
             detail="analyzer.py not found."
         )
 
-    if not PCAP_FILE.exists():
+    run_lock_file = acquire_run_lock()
+    if run_lock_file is None:
+        raise HTTPException(status_code=409, detail="A capture and analysis run is already in progress.")
+
+    load_latest_run_state()
+    if CURRENT_PCAP_FILE is None or not CURRENT_PCAP_FILE.exists():
+        release_run_lock(run_lock_file)
 
         raise HTTPException(
             status_code=404,
@@ -753,12 +938,19 @@ def analyze_pcap():
             )
         )
 
+    pcap_file = CURRENT_PCAP_FILE
+    analysis_file = RESULTS_DIR / f"analysis_manual_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.json"
+
     try:
 
         result = subprocess.run(
             [
                 sys.executable,
-                str(ANALYZER_FILE)
+                str(ANALYZER_FILE),
+                "--pcap",
+                str(pcap_file),
+                "--output",
+                str(analysis_file)
             ],
             cwd=str(PROJECT_ROOT),
             capture_output=True,
@@ -777,7 +969,14 @@ def analyze_pcap():
                 }
             )
 
-        analysis = read_analysis()
+        analysis = read_analysis(analysis_file)
+        CURRENT_ANALYSIS_FILE = analysis_file
+        save_run_state(
+            "completed",
+            f"manual_{uuid.uuid4().hex[:8]}",
+            pcap_file,
+            analysis_file
+        )
 
         return {
             "status": "Analysis completed",
@@ -808,3 +1007,6 @@ def analyze_pcap():
                 f"{error}"
             )
         )
+
+    finally:
+        release_run_lock(run_lock_file)
