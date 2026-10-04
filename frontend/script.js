@@ -7,25 +7,37 @@ let ANALYSIS = null;
    LOAD EXISTING ANALYSIS
    ============================================================ */
 
+
+  
 async function loadAnalysis() {
   try {
-    const response = await fetch(ANALYSIS_URL, { cache: "no-store" });
+    const response = await fetch(ANALYSIS_URL, {
+      cache: "no-store"
+    });
 
+    // Backend is reachable, but there is no saved analysis yet.
     if (response.status === 404) {
-    // Backend is reachable, but no analysis is available yet.
-    ANALYSIS = null;
-    updateBackendStatus(true);
-    return;
-}
+      ANALYSIS = null;
+      updateBackendStatus(true);
+      clearAnalysisView(
+        "No completed analysis is available. Run a capture to begin.",
+        "No analysis"
+      );
 
-if (!response.ok) {
-    throw new Error(`FastAPI returned HTTP ${response.status}`);
-}
+      console.log("Backend connected. No analysis available yet.");
+      return false;
+    }
+
+    if (!response.ok) {
+      throw new Error(`FastAPI returned HTTP ${response.status}`);
+    }
 
     const data = await response.json();
+
     if (!data || typeof data !== "object" || Array.isArray(data)) {
       throw new Error("The analysis response was not a valid JSON object.");
     }
+
     ANALYSIS = normalizeAnalysis(data);
 
     updateBackendStatus(true);
@@ -35,11 +47,15 @@ if (!response.ok) {
   } catch (error) {
     console.error("Unable to load analysis:", error);
     updateBackendStatus(false);
-    clearAnalysisView("No completed analysis is available.", "No analysis");
+    clearAnalysisView(
+      "Unable to retrieve analysis from the backend.",
+      "Connection error"
+    );
     showBackendError(error);
     return false;
   }
 }
+
 
 /* ============================================================
    RUN AUTOMATIC CAPTURE AND ANALYSIS THROUGH FASTAPI
