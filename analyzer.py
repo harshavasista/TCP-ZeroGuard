@@ -43,6 +43,16 @@ for packet_number, packet in enumerate(packets, start=1):
     })
 
 
+# Process by capture timestamp, using packet number to preserve capture order
+# when timestamps have the same resolution.
+tcp_packets.sort(
+    key=lambda info: (
+        info["time"],
+        info["packet_number"]
+    )
+)
+
+
 print(f"Total packets captured : {len(packets)}")
 print(f"TCP packets detected   : {len(tcp_packets)}")
 print()
@@ -115,6 +125,9 @@ recovery_count = 0
 stall_durations = []
 
 currently_stalled = False
+latest_receiver_window = None
+latest_receiver_window_time = None
+latest_receiver_window_packet = None
 
 timeline = []
 
@@ -213,6 +226,14 @@ for info in tcp_packets:
     # =====================================================
 
     elif direction == "RECEIVER -> SENDER":
+
+        # The TCP window field is an advertised receive window on ACK-bearing
+        # receiver-to-sender segments. Ignore other segment types as current
+        # state evidence while keeping them in the existing event analysis.
+        if ack_flag:
+            latest_receiver_window = window
+            latest_receiver_window_time = packet_time
+            latest_receiver_window_packet = packet_number
 
         # -------------------------------------------------
         # PROBE RESPONSE
@@ -441,7 +462,10 @@ analysis_result = {
             recovery_count > 0
         ),
 
-        "currently_stalled": currently_stalled
+        "currently_stalled": currently_stalled,
+        "latest_receive_window": latest_receiver_window,
+        "latest_receive_window_timestamp_sec": latest_receiver_window_time,
+        "latest_receive_window_packet": latest_receiver_window_packet
     },
 
     "timeline": timeline

@@ -107,12 +107,27 @@ function normalizeAnalysis(data) {
   const events = data.events || {};
   const metrics = data.metrics || {};
   const state = data.state || {};
+  const latestReceiveWindow =
+    Number.isFinite(state.latest_receive_window) && state.latest_receive_window >= 0
+      ? state.latest_receive_window
+      : null;
+  const latestWindowStatus = latestReceiveWindow === null
+    ? "unknown"
+    : latestReceiveWindow === 0
+      ? "stalled"
+      : "available";
+  const currentlyStalled = latestWindowStatus === "stalled";
+  const latestReceiveWindowPacket = Number.isFinite(
+    state.latest_receive_window_packet
+  )
+    ? state.latest_receive_window_packet
+    : null;
 
   const connection = {
     sender: `${sender.ip || "Unknown"}:${sender.port || "?"}`,
     receiver: `${receiver.ip || "Unknown"}:${receiver.port || "?"}`,
     protocol: "TCP",
-    currentlyStalled: Boolean(state.currently_stalled)
+    currentlyStalled
   };
 
   const pcap = {
@@ -219,7 +234,7 @@ function normalizeAnalysis(data) {
       return {
         value: Number.isFinite(timingValue) && timingValue >= 0
           ? formatEventDuration(timingValue)
-          : event.event === "ZERO_WINDOW_START" && state.currently_stalled
+          : event.event === "ZERO_WINDOW_START" && currentlyStalled
             ? "Ongoing"
             : undefined,
         label: timingLabel
@@ -246,37 +261,26 @@ function normalizeAnalysis(data) {
   // collection empty instead of inferring events from packet-number thresholds.
   const flaps = [];
 
-  let final = {
-    packet: 0,
-    type: "alert",
-    label: "No final event",
-    detail: ""
+  const final = {
+    packet: latestReceiveWindowPacket ?? "—",
+    type: latestWindowStatus === "stalled"
+      ? "alert"
+      : latestWindowStatus === "available"
+        ? "ok"
+        : "response",
+    tagLabel: "Final capture state",
+    label: latestWindowStatus === "stalled"
+      ? "Window Stalled"
+      : latestWindowStatus === "available"
+        ? `Window Available — ${latestReceiveWindow}`
+        : "Status Unknown",
+    window: latestReceiveWindow ?? undefined,
+    detail: latestWindowStatus === "stalled"
+      ? `Latest receiver-to-sender ACK advertisement at packet ${latestReceiveWindowPacket ?? "unknown"} had a zero TCP window.`
+      : latestWindowStatus === "available"
+        ? `Latest receiver-to-sender ACK advertisement at packet ${latestReceiveWindowPacket ?? "unknown"} had TCP window ${latestReceiveWindow}.`
+        : "No reliable receiver-advertised TCP window was present in the analysis."
   };
-
-  if (backendTimeline.length > 0) {
-    const last = backendTimeline[backendTimeline.length - 1];
-    const reopened = last.event === "WINDOW_REOPENED";
-
-    final = {
-      packet: last.packet,
-      type: reopened ? "ok" : "alert",
-      label: reopened
-        ? "Window reopened"
-        : "Zero window (ongoing)",
-      window: last.window,
-      seq: last.seq,
-      ack: last.ack,
-      payload: Number.isFinite(last.payload_length)
-        ? `${last.payload_length} byte${last.payload_length === 1 ? "" : "s"}`
-        : undefined,
-      duration: Number.isFinite(last.stall_duration)
-        ? `${String(last.stall_duration)}s`
-        : undefined,
-      detail: reopened
-        ? "The capture ended after the receive window reopened."
-        : "The capture ended while the connection was still in a zero-window state."
-    };
-  }
 
   const stallEpisodeDurations = [];
 
@@ -309,7 +313,15 @@ function normalizeAnalysis(data) {
     state: {
       stallDetected: Boolean(state.stall_detected),
       recoveryDetected: Boolean(state.recovery_detected),
-      currentlyStalled: Boolean(state.currently_stalled)
+      currentlyStalled,
+      currentWindowStatus: latestWindowStatus,
+      latestReceiveWindow,
+      latestReceiveWindowPacket,
+      latestReceiveWindowTimestamp: Number.isFinite(
+        state.latest_receive_window_timestamp_sec
+      )
+        ? state.latest_receive_window_timestamp_sec
+        : null
     }
   };
 }
@@ -558,6 +570,10 @@ function renderCascades() {
     ? ANALYSIS.timeline[0].packet
     : "—";
 
+  const latestRecovery = [...ANALYSIS.timeline]
+    .reverse()
+    .find(event => event.eventCode === "WINDOW_REOPENED");
+
   renderCascade("cascade-recovery", [
     {
       label: `Stall detected — packet ${firstPacket}`,
@@ -572,8 +588,51 @@ function renderCascades() {
       label: `${ANALYSIS.metrics.probeResponses} responses received`,
       tone: "response"
     },
-    { label: "Window reopened — 4096 bytes", tone: "ok" }
+    {
+      label: latestRecovery
+        ? `Window reopened — ${latestRecovery.window} bytes`
+        : "No window-reopened event observed",
+      tone: latestRecovery ? "ok" : "alert"
+    }
   ]);
+
+  const recoveryDescription = document.getElementById(
+    "cascade-recovery-description"
+  );
+  if (recoveryDescription) {
+    recoveryDescription.textContent = latestRecovery
+      ? "Historical recovery event from the capture; final state is shown separately below."
+      : "No window-reopened event is present in this capture.";
+  }
+
+  const recoveryDuration = document.getElementById("recovery-time-value");
+  if (recoveryDuration) {
+    recoveryDuration.textContent = ANALYSIS.metrics.recoveryEpisodes > 0
+      ? `${ANALYSIS.metrics.maximumStallDuration.toFixed(3)} s`
+      : "—";
+  }
+
+  const finalState = document.getElementById("final-flow-state");
+  if (finalState) {
+    const status = ANALYSIS.state.currentWindowStatus;
+    finalState.classList.remove(
+      "state-chip-alert",
+      "state-chip-ok",
+      "state-chip-unknown"
+    );
+    finalState.classList.add(
+      status === "stalled"
+        ? "state-chip-alert"
+        : status === "available"
+          ? "state-chip-ok"
+          : "state-chip-unknown"
+    );
+    finalState.textContent = status === "stalled"
+      ? "Zero Window"
+      : status === "available"
+        ? `Window Available — ${ANALYSIS.state.latestReceiveWindow}`
+        : "Status Unknown";
+  }
 }
 
 /* ============================================================
@@ -626,7 +685,6 @@ function buildFullEventList() {
       packet: end,
       type: "ok",
       label: "Window reopened",
-      window: 4096,
       detail: `Buffer cleared quickly — short flap #${index + 1}.`
     });
   });
@@ -677,7 +735,7 @@ function timelineRowHTML(event) {
           </span>
 
           <span class="timeline-tag tag-${event.type}">
-            ${TONE_LABEL[event.type]}
+            ${event.tagLabel || TONE_LABEL[event.type]}
           </span>
 
           <span class="timeline-label">
@@ -1197,22 +1255,44 @@ function renderPcap() {
    ============================================================ */
 
 function renderHero() {
-  const stalled = ANALYSIS.state.currentlyStalled;
+  const windowValue = ANALYSIS.state.latestReceiveWindow;
+  const status = ANALYSIS.state.currentWindowStatus;
 
+  const hero = document.querySelector(".hero");
   const state = document.getElementById("hero-state");
+  const description = document.getElementById("hero-description");
   const badge = document.getElementById("hero-badge");
 
+  if (hero) {
+    hero.classList.remove(
+      "hero-window-stalled",
+      "hero-window-available",
+      "hero-window-unknown"
+    );
+    hero.classList.add(`hero-window-${status}`);
+  }
+
   if (state) {
-    state.textContent = stalled
-      ? "Currently stalled"
-      : "Window available";
+    state.textContent = status === "stalled"
+      ? "Window Stalled"
+      : status === "available"
+        ? "Window Available"
+        : "Status Unknown";
+  }
+
+  if (description) {
+    description.textContent = status === "stalled"
+      ? "The receiver's latest TCP window advertisement is zero. Normal sender transmission must wait for receive capacity to return."
+      : status === "available"
+        ? `The receiver's latest TCP window advertisement is ${windowValue}, so receive capacity is available.`
+        : "No reliable current TCP receive-window advertisement is available in this analysis.";
   }
 
   if (badge) {
     badge.innerHTML = `
       <span class="pulse-ring"></span>
       <span class="pulse-dot"></span>
-      ${stalled ? "STALLED" : "ACTIVE"}
+      ${status === "stalled" ? "STALLED" : status === "available" ? "ACTIVE" : "UNKNOWN"}
     `;
   }
 
@@ -1236,11 +1316,17 @@ function renderHero() {
   const value = document.getElementById("gauge-value");
 
   if (level && value) {
-    const windowValue = stalled ? 0 : 4096;
-
-    level.style.width = stalled ? "0%" : "100%";
-    level.style.background = stalled ? "var(--alert)" : "";
-    value.textContent = windowValue;
+    level.style.width = status === "unknown"
+      ? "0%"
+      : status === "stalled"
+        ? "0%"
+        : "100%";
+    level.style.background = status === "stalled"
+      ? "var(--alert)"
+      : status === "available"
+        ? "var(--ok)"
+        : "";
+    value.textContent = windowValue === null ? "—" : windowValue;
   }
 }
 
@@ -1339,6 +1425,7 @@ function initAnalyzeButton() {
 
     button.innerHTML = `
       <svg
+        class="loading-spinner"
         width="15"
         height="15"
         viewBox="0 0 16 16"
@@ -1357,6 +1444,11 @@ function initAnalyzeButton() {
       Capturing & analyzing…
     `;
 
+    const spinner = button.querySelector(".loading-spinner");
+    spinner?.classList.add("is-spinning");
+
+    let failure = null;
+
     try {
       console.log(
         "Starting TCP-ZeroGuard automatic capture and analysis..."
@@ -1371,16 +1463,20 @@ function initAnalyzeButton() {
 
         renderAll();
       } else {
-        showAnalysisError(result.error);
+        failure = result.error;
       }
     } catch (error) {
       console.error("Capture and analysis failed:", error);
-
-      showAnalysisError(error);
+      failure = error;
     } finally {
+      spinner?.classList.remove("is-spinning");
       button.classList.remove("is-running");
       button.disabled = false;
       button.innerHTML = original;
+    }
+
+    if (failure) {
+      showAnalysisError(failure);
     }
   });
 }

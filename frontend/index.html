@@ -82,17 +82,17 @@
       <!-- ============ PAGE: DASHBOARD ============ -->
       <section class="page active" id="page-dashboard">
 
-        <div class="hero">
+        <div class="hero hero-window-unknown">
           <div class="hero-top">
             <div class="hero-heading">
               <span class="hero-kicker">TCP flow status</span>
-              <h2 id="hero-state">Currently stalled</h2>
-              <p>Receiver advertised a zero TCP receive window. The sender has halted normal segment transmission and is holding unacknowledged data.</p>
+              <h2 id="hero-state">Status Unknown</h2>
+              <p id="hero-description">No reliable current TCP receive-window advertisement is available in this analysis.</p>
             </div>
             <div class="hero-badge" id="hero-badge">
               <span class="pulse-ring"></span>
               <span class="pulse-dot"></span>
-              STALLED
+              UNKNOWN
             </div>
           </div>
 
@@ -108,7 +108,7 @@
               </div>
               <div class="channel-gauge">
                 <div class="gauge-track"><div class="gauge-level" id="gauge-level"></div></div>
-                <div class="gauge-readout"><span id="gauge-value">0</span> B window</div>
+                <div class="gauge-readout"><span id="gauge-value">0</span> TCP window</div>
               </div>
               <div class="channel-proto">TCP</div>
             </div>
@@ -138,17 +138,17 @@
         <div class="panel">
           <div class="panel-head">
             <h3>Recovery sequence</h3>
-            <p>Probe-and-response cycle that reopened the window after the longest recorded stall.</p>
+            <p id="cascade-recovery-description">Historical recovery events are separate from the final capture state.</p>
           </div>
           <div class="cascade cascade-recovery" id="cascade-recovery"></div>
           <div class="recovery-foot">
             <div class="recovery-time">
-              <span class="recovery-time-value">9.969s</span>
+              <span class="recovery-time-value" id="recovery-time-value">—</span>
               <span class="recovery-time-label">time to recovery</span>
             </div>
             <div class="recovery-state">
               <span class="foot-label">Current state at end of capture</span>
-              <span class="state-chip state-chip-alert">Zero window</span>
+              <span class="state-chip state-chip-unknown" id="final-flow-state">Status Unknown</span>
             </div>
           </div>
         </div>
