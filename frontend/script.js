@@ -1577,6 +1577,59 @@ function initTooltips() {
   });
 }
 
+function initPdfDownload() {
+  const btn = document.getElementById("download-pdf-btn");
+  if (!btn) return;
+
+  btn.addEventListener("click", async () => {
+    if (btn.disabled) return;
+
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.6" stroke-dasharray="28" stroke-dashoffset="10"/>
+      </svg>
+      Generating...
+    `;
+
+    try {
+      const response = await fetch(`${API_BASE}/api/report/pdf`, { cache: "no-store" });
+
+      if (response.status === 404) {
+        throw new Error("No completed analysis available. Run an analysis first.");
+      }
+
+      if (!response.ok) {
+        let msg = "Failed to generate PDF report.";
+        try {
+          const err = await response.json();
+          if (err.detail) msg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
+        } catch {}
+        throw new Error(msg);
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = response.headers.get("Content-Disposition")?.match(/filename="(.+)"/)?.[1] || `TCP-ZeroGuard-Report-${new Date().toISOString().slice(0,19).replace(/[:.]/g,"-")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+    } catch (error) {
+      console.error("PDF download failed:", error);
+      window.alert(`PDF download failed:\n\n${error.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = original;
+    }
+  });
+}
+
 /* ============================================================
    RENDER EVERYTHING
    ============================================================ */
@@ -1682,6 +1735,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initNav();
   initAnalyzeButton();
   initTooltips();
+  initPdfDownload();
 
   if (await loadAnalysis()) {
     renderAll();

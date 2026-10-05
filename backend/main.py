@@ -10,14 +10,33 @@ import threading
 import uuid
 import random
 from pathlib import Path
+from datetime import datetime
+from io import BytesIO
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 try:
     import msvcrt
 except ImportError:
     msvcrt = None
     import fcntl
+
+# PDF generation
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.colors import HexColor
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    PageBreak,
+    HRFlowable
+)
 
 
 # ============================================================
@@ -1060,3 +1079,315 @@ def analyze_pcap():
 
     finally:
         release_run_lock(run_lock_file)
+
+
+# ============================================================
+# PDF REPORT DOWNLOAD
+# ============================================================
+
+@app.get("/api/report/pdf")
+def download_pdf_report():
+    """
+    Generate and return a PDF report based on the current analysis results.
+    Uses the same analysis data that the dashboard displays.
+    """
+    load_latest_run_state()
+    if CURRENT_ANALYSIS_FILE is None or not CURRENT_ANALYSIS_FILE.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No completed analysis available. Run an analysis first."
+        )
+
+    try:
+        analysis = read_analysis(CURRENT_ANALYSIS_FILE)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read analysis data: {e}"
+        )
+
+    # Generate PDF
+    buffer = BytesIO()
+    try:
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=50,
+            leftMargin=50,
+            topMargin=50,
+            bottomMargin=50
+        )
+
+        styles = getSampleStyleSheet()
+        story = []
+
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=22,
+            textColor=HexColor('#1a1a2e'),
+            spaceAfter=6,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+
+        subtitle_style = ParagraphStyle(
+            'CustomSubtitle',
+            parent=styles['Normal'],
+            fontSize=11,
+            textColor=HexColor('#666666'),
+            spaceAfter=20,
+            alignment=TA_CENTER,
+        )
+
+        section_style = ParagraphStyle(
+            'SectionHeader',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=HexColor('#00b4d8'),
+            spaceBefore=18,
+            spaceAfter=10,
+            fontName='Helvetica-Bold',
+            borderWidth=0,
+            borderPadding=0,
+        )
+
+        subsection_style = ParagraphStyle(
+            'SubsectionHeader',
+            parent=styles['Heading3'],
+            fontSize=11,
+            textColor=HexColor('#333333'),
+            spaceBefore=10,
+            spaceAfter=6,
+            fontName='Helvetica-Bold',
+        )
+
+        body_style = ParagraphStyle(
+            'CustomBody',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=HexColor('#333333'),
+            spaceAfter=4,
+            leading=14,
+        )
+
+        label_style = ParagraphStyle(
+            'LabelStyle',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=HexColor('#555555'),
+            fontName='Helvetica-Bold',
+        )
+
+        value_style = ParagraphStyle(
+            'ValueStyle',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=HexColor('#222222'),
+        )
+
+        status_colors = {
+            'HEALTHY': '#2ecc71',
+            'RECOVERED': '#00b4d8',
+            'CURRENTLY STALLED': '#e74c3c',
+            'STALL DETECTED (UNRESOLVED)': '#f39c12',
+            'UNKNOWN': '#95a5a6',
+        }
+
+        # ============ TITLE ============
+        story.append(Paragraph("TCP-ZeroGuard Analysis Report", title_style))
+        story.append(Paragraph(
+            f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            subtitle_style
+        ))
+        story.append(HRFlowable(width="100%", thickness=2, color=HexColor('#00b4d8'), spaceAfter=20))
+
+        # ============ 1. CAPTURE INFORMATION ============
+        story.append(Paragraph("1. Capture Information", section_style))
+
+        capture = analysis.get('capture', {})
+        pcap_file = analysis.get('capture', {}).get('total_packets', 'N/A')
+        pcap_filename = Path(CURRENT_ANALYSIS_FILE).stem.replace('analysis_', 'tcp_zero_window_') + '.pcapng'
+
+        capture_data = [
+            ['Field', 'Value'],
+            ['PCAP Filename', pcap_filename],
+            ['Total Packets', str(capture.get('total_packets', 'N/A'))],
+            ['TCP Packets', str(capture.get('tcp_packets', 'N/A'))],
+            ['Analyzer', 'TCP-ZeroGuard'],
+            ['Analysis Status', 'Completed'],
+            ['Report Generated', datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
+        ]
+
+        capture_table = Table(capture_data, colWidths=[2.2*inch, 4*inch])
+        capture_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), HexColor('#00b4d8')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#ffffff')),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BACKGROUND', (0, 1), (-1, -1), HexColor('#f8f9fa')),
+            ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#dee2e6')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+        ]))
+        story.append(capture_table)
+        story.append(Spacer(1, 16))
+
+        # ============ 2. TCP METRICS ============
+        story.append(Paragraph("2. TCP Metrics", section_style))
+
+        metrics = analysis.get('metrics', {})
+        events = analysis.get('events', {})
+
+        metrics_data = [
+            ['Metric', 'Value'],
+            ['Zero Window Packets', str(events.get('zero_window_packets', 0))],
+            ['Stall Episodes', str(events.get('stall_episodes', 0))],
+            ['Zero Window Probes', str(events.get('confirmed_probes', 0))],
+            ['Probe Responses', str(events.get('probe_responses', 0))],
+            ['Recovery Episodes', str(events.get('recovery_episodes', 0))],
+            ['Total Stall Duration', f"{metrics.get('total_stall_duration_sec', 0):.3f} s"],
+            ['Maximum Stall Duration', f"{metrics.get('maximum_stall_duration_sec', 0):.3f} s"],
+            ['Average Stall Duration', f"{metrics.get('average_stall_duration_sec', 0):.3f} s"],
+        ]
+
+        metrics_table = Table(metrics_data, colWidths=[2.8*inch, 3.4*inch])
+        metrics_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), HexColor('#00b4d8')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#ffffff')),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BACKGROUND', (0, 1), (-1, -1), HexColor('#f8f9fa')),
+            ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#dee2e6')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+        ]))
+        story.append(metrics_table)
+        story.append(Spacer(1, 16))
+
+        # ============ 3. ROOT CAUSE ANALYSIS ============
+        story.append(Paragraph("3. Root Cause Analysis", section_style))
+
+        root_cause = analysis.get('root_cause_analysis', {})
+        if root_cause:
+            status = root_cause.get('status', 'UNKNOWN')
+            status_color = status_colors.get(status, '#95a5a6')
+
+            rc_data = [
+                ['Field', 'Details'],
+                ['Status', status],
+                ['Likely Cause', root_cause.get('likely_cause', 'N/A')],
+                ['Explanation', root_cause.get('explanation', 'N/A')],
+                ['Impact', root_cause.get('impact', 'N/A')],
+                ['Recommendation', root_cause.get('recommendation', 'N/A')],
+            ]
+
+            rc_table = Table(rc_data, colWidths=[1.8*inch, 4.4*inch])
+            rc_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#00b4d8')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#ffffff')),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BACKGROUND', (0, 1), (0, -1), HexColor('#f8f9fa')),
+                ('BACKGROUND', (1, 1), (1, 1), HexColor(status_color + '20')),
+                ('TEXTCOLOR', (1, 1), (1, 1), HexColor(status_color)),
+                ('FONTNAME', (1, 1), (1, 1), 'Helvetica-Bold'),
+                ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#dee2e6')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+            ]))
+            story.append(rc_table)
+        else:
+            story.append(Paragraph("Root cause analysis not available in this analysis.", body_style))
+        story.append(Spacer(1, 16))
+
+        # ============ 4. IMPORTANT EVENT TIMELINE ============
+        story.append(Paragraph("4. Important Event Timeline", section_style))
+
+        timeline = analysis.get('timeline', [])
+        event_rows = [['Packet', 'Event', 'Window', 'Sequence', 'ACK', 'Payload', 'Timing']]
+
+        # Filter for important events only
+        important_events = ['ZERO_WINDOW_START', 'ZERO_WINDOW_PROBE', 'PROBE_RESPONSE', 'WINDOW_REOPENED']
+        event_count = 0
+        for event in timeline:
+            if event.get('event') in important_events and event_count < 30:
+                event_name_map = {
+                    'ZERO_WINDOW_START': 'Zero Window Start',
+                    'ZERO_WINDOW_PROBE': 'Zero Window Probe',
+                    'PROBE_RESPONSE': 'Probe Response',
+                    'WINDOW_REOPENED': 'Window Reopened',
+                }
+                timing = ''
+                if event.get('event') == 'ZERO_WINDOW_START' and event.get('stall_duration') is not None:
+                    timing = f"Stall: {event['stall_duration']:.3f}s"
+                elif event.get('event') == 'ZERO_WINDOW_PROBE' and event.get('probe_interval_sec') is not None:
+                    timing = f"Interval: {event['probe_interval_sec']:.3f}s"
+                elif event.get('event') == 'PROBE_RESPONSE' and event.get('probe_response_latency_sec') is not None:
+                    timing = f"Latency: {event['probe_response_latency_sec']*1000:.2f}ms"
+                elif event.get('event') == 'WINDOW_REOPENED' and event.get('stall_duration') is not None:
+                    timing = f"Stall: {event['stall_duration']:.3f}s"
+
+                event_rows.append([
+                    str(event.get('packet', 'N/A')),
+                    event_name_map.get(event.get('event'), event.get('event', 'N/A')),
+                    str(event.get('window', 'N/A')),
+                    str(event.get('seq', 'N/A')),
+                    str(event.get('ack', 'N/A')),
+                    f"{event.get('payload_length', 0)} bytes",
+                    timing,
+                ])
+                event_count += 1
+
+        if event_count == 0:
+            event_rows.append(['—', 'No significant events recorded', '—', '—', '—', '—', '—'])
+
+        event_table = Table(event_rows, colWidths=[0.5*inch, 1.1*inch, 0.6*inch, 1.0*inch, 1.0*inch, 0.7*inch, 1.3*inch])
+        event_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), HexColor('#00b4d8')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#ffffff')),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BACKGROUND', (0, 1), (-1, -1), HexColor('#f8f9fa')),
+            ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#dee2e6')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [HexColor('#ffffff'), HexColor('#f8f9fa')]),
+        ]))
+        story.append(event_table)
+        story.append(Spacer(1, 20))
+
+        # Footer
+        story.append(HRFlowable(width="100%", thickness=1, color=HexColor('#dee2e6'), spaceAfter=10))
+        story.append(Paragraph(
+            "TCP-ZeroGuard — TCP Receive-Window Stall Detection & Analysis",
+            ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, textColor=HexColor('#999999'), alignment=TA_CENTER)
+        ))
+
+        doc.build(story)
+        buffer.seek(0)
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate PDF report: {e}"
+        )
+
+    # Return PDF as streaming response
+    timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    filename = f"TCP-ZeroGuard-Report-{timestamp}.pdf"
+
+    return StreamingResponse(
+        BytesIO(buffer.read()),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
