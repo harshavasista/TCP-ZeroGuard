@@ -1,4 +1,4 @@
-const API_BASE = "https://tcp-zeroguard.onrender.com";
+const API_BASE = "http://127.0.0.1:8000";
 const ANALYSIS_URL = `${API_BASE}/api/analysis`;
 const START_CAPTURE_URL = `${API_BASE}/api/start-capture`;
 let ANALYSIS = null;
@@ -338,7 +338,8 @@ function normalizeAnalysis(data) {
       stallDetected: Boolean(state.stall_detected),
       recoveryDetected: Boolean(state.recovery_detected),
       currentlyStalled: Boolean(state.currently_stalled)
-    }
+    },
+    root_cause_analysis: data.root_cause_analysis || null
   };
 }
 
@@ -1580,6 +1581,65 @@ function initTooltips() {
    RENDER EVERYTHING
    ============================================================ */
 
+function renderDiagnosis() {
+  const el = document.getElementById("diagnosis-panel");
+  if (!el) return;
+
+  const rootCause = ANALYSIS?.root_cause_analysis;
+  if (!rootCause) {
+    el.innerHTML = "";
+    return;
+  }
+
+  const status = rootCause.status || "UNKNOWN";
+  const likelyCause = rootCause.likely_cause || "Indeterminate";
+  const explanation = rootCause.explanation || "";
+  const impact = rootCause.impact || "";
+  const recommendation = rootCause.recommendation || "";
+
+  const statusClassMap = {
+    "HEALTHY": "diagnosis-status-healthy",
+    "CURRENTLY STALLED": "diagnosis-status-stalled",
+    "RECOVERED": "diagnosis-status-recovered",
+    "STALL DETECTED (UNRESOLVED)": "diagnosis-status-unresolved",
+    "UNKNOWN": "diagnosis-status-unknown"
+  };
+  const statusClass = statusClassMap[status] || "diagnosis-status-unknown";
+
+  el.innerHTML = `
+    <div class="diagnosis-head">
+      <div class="diagnosis-icon">
+        <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M8 4v5M8 11v.01" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </div>
+      <h3 class="diagnosis-title">Why is the connection slow?</h3>
+    </div>
+    <div class="diagnosis-grid">
+      <div class="diagnosis-field">
+        <div class="diagnosis-field-label">Status</div>
+        <div class="diagnosis-field-value">
+          <span class="diagnosis-status ${statusClass}">${status}</span>
+        </div>
+      </div>
+      <div class="diagnosis-field">
+        <div class="diagnosis-field-label">Likely Cause</div>
+        <div class="diagnosis-field-value">${likelyCause}</div>
+      </div>
+      <div class="diagnosis-field">
+        <div class="diagnosis-field-label">Explanation</div>
+        <div class="diagnosis-field-value">${explanation}</div>
+      </div>
+      <div class="diagnosis-field">
+        <div class="diagnosis-field-label">Impact</div>
+        <div class="diagnosis-field-value">${impact}</div>
+      </div>
+      <div class="diagnosis-field">
+        <div class="diagnosis-field-label">Recommendation</div>
+        <div class="diagnosis-field-value">${recommendation}</div>
+      </div>
+    </div>
+  `;
+}
+
 function renderAll() {
   if (!ANALYSIS) {
     return;
@@ -1593,6 +1653,7 @@ function renderAll() {
   renderStallStats();
   renderStallChart();
   renderPcap();
+  renderDiagnosis();
 
   tableRows = buildTableRows();
   activeFilter = "all";

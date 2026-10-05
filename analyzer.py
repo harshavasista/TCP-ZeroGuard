@@ -472,6 +472,99 @@ else:
 
 
 # ---------------------------------------------------------
+# ROOT CAUSE ANALYSIS
+# ---------------------------------------------------------
+
+def determine_root_cause(metrics, state):
+    """
+    Determine the root cause of TCP performance issues based on
+    existing zero-window metrics and connection state.
+    
+    Args:
+        metrics: Dict with zero_window_packets, stall_episodes, confirmed_probes,
+                 probe_responses, recovery_episodes, total_stall_duration_sec,
+                 maximum_stall_duration_sec, average_stall_duration_sec
+        state: Dict with stall_detected, recovery_detected, currently_stalled
+    
+    Returns:
+        Dict with status, likely_cause, explanation, impact, recommendation
+    """
+    zero_window_packets = metrics.get("zero_window_packets", 0)
+    stall_episodes = metrics.get("stall_episodes", 0)
+    recovery_episodes = metrics.get("recovery_episodes", 0)
+    currently_stalled = state.get("currently_stalled", False)
+    stall_detected = state.get("stall_detected", False)
+    recovery_detected = state.get("recovery_detected", False)
+
+    # No zero-window condition detected
+    if zero_window_packets == 0 and not stall_detected:
+        return {
+            "status": "HEALTHY",
+            "likely_cause": "No significant receive-window stall detected",
+            "explanation": "The receiver continued advertising available TCP receive-window capacity throughout the capture.",
+            "impact": "No significant TCP receive-window impact detected.",
+            "recommendation": "No receive-window action required."
+        }
+
+    # Currently stalled - receiver is advertising zero window right now
+    if currently_stalled:
+        return {
+            "status": "CURRENTLY STALLED",
+            "likely_cause": "Receiver-side processing/read delay",
+            "explanation": "The receiver is currently advertising a zero TCP receive window, indicating it cannot accept additional data at this moment. Normal transmission is being restricted by receiver-side flow control.",
+            "impact": "TCP transmission is currently stalled by receiver-side flow control. The sender cannot transmit new data until the window reopens.",
+            "recommendation": "Check receiver processing speed, application read delays, and receive-buffer availability immediately."
+        }
+
+    # Zero-window events occurred but recovery was detected
+    if stall_detected and recovery_detected:
+        return {
+            "status": "RECOVERED",
+            "likely_cause": "Receiver-side processing/read delay (now resolved)",
+            "explanation": f"The receiver advertised a zero TCP receive window {stall_episodes} time(s), indicating temporary inability to accept data. The receive window later reopened ({recovery_episodes} recovery episode(s) detected) and transmission recovered.",
+            "impact": f"TCP transmission was temporarily stalled by receiver-side flow control. Total stall duration: {metrics.get('total_stall_duration_sec', 0):.3f}s. Maximum single stall: {metrics.get('maximum_stall_duration_sec', 0):.3f}s.",
+            "recommendation": "Check receiver processing speed, application read delays, and receive-buffer sizing. Consider increasing socket receive buffer (SO_RCVBUF) if stalls are frequent."
+        }
+
+    # Zero-window detected but no recovery (edge case)
+    if stall_detected and not recovery_detected:
+        return {
+            "status": "STALL DETECTED (UNRESOLVED)",
+            "likely_cause": "Receiver-side processing/read delay",
+            "explanation": f"The receiver advertised a zero TCP receive window {stall_episodes} time(s), but no window reopening was detected in the capture. The stall may still be ongoing or the capture ended before recovery.",
+            "impact": "TCP transmission was stalled by receiver-side flow control. Recovery status unknown.",
+            "recommendation": "Verify if the receiver is still running and able to process data. Check for application hangs or buffer exhaustion."
+        }
+
+    # Fallback
+    return {
+        "status": "UNKNOWN",
+        "likely_cause": "Indeterminate",
+        "explanation": "Unable to determine root cause from available metrics.",
+        "impact": "Unknown.",
+        "recommendation": "Review raw packet capture for additional context."
+    }
+
+
+root_cause = determine_root_cause(
+    {
+        "zero_window_packets": zero_window_packet_count,
+        "stall_episodes": stall_episode_count,
+        "confirmed_probes": probe_count,
+        "probe_responses": probe_response_count,
+        "recovery_episodes": recovery_count,
+        "total_stall_duration_sec": round(total_stall_duration, 3),
+        "maximum_stall_duration_sec": round(maximum_stall_duration, 3),
+        "average_stall_duration_sec": round(average_stall_duration, 3)
+    },
+    {
+        "stall_detected": stall_episode_count > 0,
+        "recovery_detected": recovery_count > 0,
+        "currently_stalled": currently_stalled
+    }
+)
+
+# ---------------------------------------------------------
 # BUILD RESULT
 # ---------------------------------------------------------
 
@@ -532,6 +625,8 @@ analysis_result = {
 
         "currently_stalled": currently_stalled
     },
+
+    "root_cause_analysis": root_cause,
 
     "timeline": timeline
 }

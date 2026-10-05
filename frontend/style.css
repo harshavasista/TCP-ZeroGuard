@@ -491,3 +491,53 @@ input{font-family:inherit;}
   .recovery-foot{flex-direction:column; align-items:flex-start; gap:14px;}
   .recovery-state{align-items:flex-start;}
 }
+
+/* ============================================================
+   Diagnosis panel — "Why is the connection slow?"
+   ============================================================ */
+.diagnosis-panel{
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius-lg);
+  padding:22px 24px 24px; margin-bottom:18px;
+}
+.diagnosis-panel:empty{display:none;}
+
+.diagnosis-head{
+  display:flex; align-items:center; gap:12px; margin-bottom:18px;
+}
+.diagnosis-icon{
+  width:32px; height:32px; border-radius:var(--radius);
+  display:flex; align-items:center; justify-content:center;
+  background:var(--alert-soft); color:var(--alert);
+  border:1px solid rgba(226,84,61,.3);
+}
+.diagnosis-icon svg{width:16px; height:16px;}
+
+.diagnosis-title{font-size:15.5px; font-weight:600;}
+
+.diagnosis-grid{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px;
+}
+
+.diagnosis-field{
+  background:var(--panel-2); border:1px solid var(--line); border-radius:var(--radius);
+  padding:14px 16px; transition:border-color .15s ease;
+}
+.diagnosis-field:hover{border-color:var(--line-soft);}
+
+.diagnosis-field-label{
+  font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.5px;
+  font-weight:600; margin-bottom:6px;
+}
+.diagnosis-field-value{
+  font-size:13px; color:var(--text); line-height:1.5;
+}
+
+.diagnosis-status{
+  font-family:var(--font-mono); font-size:12px; font-weight:600; letter-spacing:.3px;
+  padding:2px 8px; border-radius:8px; display:inline-block;
+}
+.diagnosis-status-healthy{background:var(--ok-soft); color:var(--ok);}
+.diagnosis-status-stalled{background:var(--alert-soft); color:var(--alert);}
+.diagnosis-status-recovered{background:var(--response-soft); color:var(--response);}
+.diagnosis-status-unresolved{background:var(--probe-soft); color:var(--probe);}
+.diagnosis-status-unknown{background:var(--line); color:var(--text-dim);}
