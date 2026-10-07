@@ -1,5 +1,7 @@
 import socket
 import time
+import os
+import random
 
 HOST = "127.0.0.1"
 PORT = 5000
@@ -9,7 +11,8 @@ PORT = 5000
 # ---------------------------------------------------------
 
 TEST_DURATION = 35       # seconds
-CHUNK_SIZE = 4096        # bytes
+MIN_CHUNK_SIZE = 2048    # minimum bytes per send
+MAX_CHUNK_SIZE = 8192    # maximum bytes per send
 
 # ---------------------------------------------------------
 # CREATE TCP SOCKET
@@ -30,19 +33,34 @@ print()
 # SEND DATA
 # ---------------------------------------------------------
 
-data = b"A" * CHUNK_SIZE
-
 total_sent = 0
 start_time = time.time()
 
 send_blocked_count = 0
 
 print("Starting TCP transmission...")
+print("Generating different data for every transmission...")
 print()
 
 try:
 
     while time.time() - start_time < TEST_DURATION:
+
+        # -------------------------------------------------
+        # GENERATE DIFFERENT DATA FOR EVERY SEND
+        # -------------------------------------------------
+
+        current_chunk_size = random.randint(
+            MIN_CHUNK_SIZE,
+            MAX_CHUNK_SIZE
+        )
+
+        # Generate random binary data
+        data = os.urandom(current_chunk_size)
+
+        # -------------------------------------------------
+        # SEND DATA
+        # -------------------------------------------------
 
         send_start = time.time()
 
@@ -56,6 +74,7 @@ try:
 
             print(
                 f"Sent: {total_sent / 1024:.1f} KB | "
+                f"Chunk: {current_chunk_size} bytes | "
                 f"Send time: {elapsed:.3f} sec"
             )
 
@@ -70,17 +89,18 @@ try:
 
             continue
 
-        except (ConnectionResetError,
-                BrokenPipeError,
-                ConnectionAbortedError):
+        except (
+            ConnectionResetError,
+            BrokenPipeError,
+            ConnectionAbortedError
+        ):
 
             print()
             print("Receiver closed the connection.")
             break
 
-        # Small delay to make the experiment easier to observe
+        # Small delay to make TCP behavior easier to observe
         time.sleep(0.01)
-
 
 # ---------------------------------------------------------
 # FINISH

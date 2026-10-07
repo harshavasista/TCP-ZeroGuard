@@ -1,15 +1,29 @@
 from scapy.all import rdpcap, TCP, IP
+import argparse
 import json
 import os
 
-PCAP_FILE = "capture/tcp_zero_window.pcapng"
-RESULT_FILE = "results/analysis.json"
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_PCAP_FILE = os.path.join(PROJECT_ROOT, "capture", "tcp_zero_window.pcapng")
+DEFAULT_RESULT_FILE = os.path.join(PROJECT_ROOT, "results", "analysis.json")
 SERVER_PORT = 5000
+MIN_STALL_DURATION_SEC = 0.001
+RECOVERY_DEBOUNCE_SEC = 0.050  # 50 ms debounce to confirm window recovery (avoids false splits from transient updates)
+
+parser = argparse.ArgumentParser(description="Analyze a TCP-ZeroGuard packet capture.")
+parser.add_argument("--pcap", default=DEFAULT_PCAP_FILE, help="PCAP file to analyze")
+parser.add_argument("--output", default=DEFAULT_RESULT_FILE, help="JSON output path")
+args = parser.parse_args()
+PCAP_FILE = args.pcap
+RESULT_FILE = args.output
 
 
 # ---------------------------------------------------------
 # LOAD CAPTURE
 # ---------------------------------------------------------
+
+print(f"Analyzer input PCAP : {PCAP_FILE}")
+print(f"Analyzer output JSON: {RESULT_FILE}")
 
 packets = rdpcap(PCAP_FILE)
 
@@ -41,16 +55,6 @@ for packet_number, packet in enumerate(packets, start=1):
         "payload_length": len(bytes(tcp.payload)),
         "flags": int(tcp.flags)
     })
-
-
-# Process by capture timestamp, using packet number to preserve capture order
-# when timestamps have the same resolution.
-tcp_packets.sort(
-    key=lambda info: (
-        info["time"],
-        info["packet_number"]
-    )
-)
 
 
 print(f"Total packets captured : {len(packets)}")
@@ -113,6 +117,8 @@ zero_window_start_event = None
 last_zero_window_ack = None
 waiting_for_probe_response = False
 outstanding_probe_time = None
+outstanding_probe_seq = None
+outstanding_probe_ack = None
 previous_probe_time = None
 
 zero_window_packet_count = 0
@@ -125,11 +131,9 @@ recovery_count = 0
 stall_durations = []
 
 currently_stalled = False
-latest_receiver_window = None
-latest_receiver_window_time = None
-latest_receiver_window_packet = None
 
 timeline = []
+pending_recovery = None
 
 
 # ---------------------------------------------------------
@@ -211,6 +215,8 @@ for info in tcp_packets:
 
             timeline.append(event)
             outstanding_probe_time = packet_time
+            outstanding_probe_seq = seq
+            outstanding_probe_ack = ack
             previous_probe_time = packet_time
 
             print(
@@ -227,13 +233,48 @@ for info in tcp_packets:
 
     elif direction == "RECEIVER -> SENDER":
 
-        # The TCP window field is an advertised receive window on ACK-bearing
-        # receiver-to-sender segments. Ignore other segment types as current
-        # state evidence while keeping them in the existing event analysis.
-        if ack_flag:
-            latest_receiver_window = window
-            latest_receiver_window_time = packet_time
-            latest_receiver_window_packet = packet_number
+        # Confirm a recovery only after the positive window remains stable.
+        # A zero-window update arriving within the debounce interval belongs
+        # to the same stall, not a new episode separated by a packet blip.
+        if pending_recovery is not None:
+            pending_gap = packet_time - pending_recovery["time"]
+
+            if window == 0 and pending_gap < RECOVERY_DEBOUNCE_SEC:
+                pending_recovery = None
+            elif pending_gap >= RECOVERY_DEBOUNCE_SEC:
+                recovery = pending_recovery
+                recovery_count += 1
+                zero_window_active = False
+                currently_stalled = False
+                stall_durations.append(recovery["duration"])
+
+                event = {
+                    "packet": recovery["packet"],
+                    "event": "WINDOW_REOPENED",
+                    "timestamp_sec": recovery["time"],
+                    "window": recovery["window"],
+                    "seq": recovery["seq"],
+                    "ack": recovery["ack"],
+                    "payload_length": recovery["payload_length"],
+                    "start_timestamp_sec": zero_window_start_time,
+                    "recovery_timestamp_sec": recovery["time"],
+                    "stall_duration": recovery["duration"]
+                }
+
+                if zero_window_start_event is not None:
+                    zero_window_start_event["stall_duration"] = recovery["duration"]
+
+                timeline.append(event)
+                print(
+                    f"[WINDOW REOPENED] Packet {recovery['packet']} | "
+                    f"Window={recovery['window']} | "
+                    f"Stall={recovery['duration']:.3f} sec"
+                )
+                zero_window_start_time = None
+                zero_window_start_event = None
+                pending_recovery = None
+            # Short positive updates remain provisional while the current
+            # packet still participates in probe and zero-window detection.
 
         # -------------------------------------------------
         # PROBE RESPONSE
@@ -244,6 +285,13 @@ for info in tcp_packets:
             and waiting_for_probe_response
             and ack_flag
             and payload_length == 0
+            and outstanding_probe_seq is not None
+            and outstanding_probe_ack is not None
+            and seq == outstanding_probe_ack
+            and ack in (
+                outstanding_probe_seq,
+                (outstanding_probe_seq + 1) & 0xFFFFFFFF
+            )
         ):
 
             probe_response_count += 1
@@ -268,6 +316,8 @@ for info in tcp_packets:
 
             timeline.append(event)
             outstanding_probe_time = None
+            outstanding_probe_seq = None
+            outstanding_probe_ack = None
 
             print(
                 f"[PROBE RESPONSE] "
@@ -295,6 +345,8 @@ for info in tcp_packets:
                 zero_window_start_time = packet_time
                 previous_probe_time = None
                 outstanding_probe_time = None
+                outstanding_probe_seq = None
+                outstanding_probe_ack = None
 
                 stall_episode_count += 1
 
@@ -336,54 +388,70 @@ for info in tcp_packets:
         elif (
             zero_window_active
             and window > 0
+            and pending_recovery is None
         ):
-
-            recovery_count += 1
-
-            zero_window_active = False
-            currently_stalled = False
-
             if zero_window_start_time is not None:
-
                 duration = (
                     packet_time
                     - zero_window_start_time
                 )
 
-                stall_durations.append(duration)
+                # Loopback captures can contain a transient non-zero window
+                # update only microseconds after a zero-window ACK. Do not
+                # split one continuous stall into artificial episodes.
+                if duration < MIN_STALL_DURATION_SEC:
+                    continue
 
-                event = {
+                pending_recovery = {
                     "packet": packet_number,
-                    "event": "WINDOW_REOPENED",
-                    "timestamp_sec": packet_time,
+                    "time": packet_time,
                     "window": window,
                     "seq": seq,
                     "ack": ack,
                     "payload_length": payload_length,
-                    "start_timestamp_sec": zero_window_start_time,
-                    "recovery_timestamp_sec": packet_time,
-                    "stall_duration": duration
+                    "duration": duration
                 }
 
-                if zero_window_start_event is not None:
-                    zero_window_start_event["stall_duration"] = duration
-
-                timeline.append(event)
-
-                print(
-                    f"[WINDOW REOPENED] "
-                    f"Packet {packet_number} | "
-                    f"Window={window} | "
-                    f"Stall={duration:.3f} sec"
-                )
-
-                zero_window_start_time = None
-                zero_window_start_event = None
+            else:
+                recovery_count += 1
+                zero_window_active = False
+                currently_stalled = False
 
 
 # ---------------------------------------------------------
 # CALCULATE STATISTICS
 # ---------------------------------------------------------
+
+# If the capture ends after a positive window with no quick zero-window
+# rebound, the observed recovery is confirmed by the end of the capture.
+if pending_recovery is not None:
+    recovery = pending_recovery
+    recovery_count += 1
+    zero_window_active = False
+    currently_stalled = False
+    stall_durations.append(recovery["duration"])
+    event = {
+        "packet": recovery["packet"],
+        "event": "WINDOW_REOPENED",
+        "timestamp_sec": recovery["time"],
+        "window": recovery["window"],
+        "seq": recovery["seq"],
+        "ack": recovery["ack"],
+        "payload_length": recovery["payload_length"],
+        "start_timestamp_sec": zero_window_start_time,
+        "recovery_timestamp_sec": recovery["time"],
+        "stall_duration": recovery["duration"]
+    }
+    if zero_window_start_event is not None:
+        zero_window_start_event["stall_duration"] = recovery["duration"]
+    timeline.append(event)
+    print(
+        f"[WINDOW REOPENED] Packet {recovery['packet']} | "
+        f"Window={recovery['window']} | "
+        f"Stall={recovery['duration']:.3f} sec"
+    )
+
+timeline.sort(key=lambda event: (event["timestamp_sec"], event["packet"]))
 
 if stall_durations:
 
@@ -402,6 +470,99 @@ else:
     maximum_stall_duration = 0.0
     average_stall_duration = 0.0
 
+
+# ---------------------------------------------------------
+# ROOT CAUSE ANALYSIS
+# ---------------------------------------------------------
+
+def determine_root_cause(metrics, state):
+    """
+    Determine the root cause of TCP performance issues based on
+    existing zero-window metrics and connection state.
+    
+    Args:
+        metrics: Dict with zero_window_packets, stall_episodes, confirmed_probes,
+                 probe_responses, recovery_episodes, total_stall_duration_sec,
+                 maximum_stall_duration_sec, average_stall_duration_sec
+        state: Dict with stall_detected, recovery_detected, currently_stalled
+    
+    Returns:
+        Dict with status, likely_cause, explanation, impact, recommendation
+    """
+    zero_window_packets = metrics.get("zero_window_packets", 0)
+    stall_episodes = metrics.get("stall_episodes", 0)
+    recovery_episodes = metrics.get("recovery_episodes", 0)
+    currently_stalled = state.get("currently_stalled", False)
+    stall_detected = state.get("stall_detected", False)
+    recovery_detected = state.get("recovery_detected", False)
+
+    # No zero-window condition detected
+    if zero_window_packets == 0 and not stall_detected:
+        return {
+            "status": "HEALTHY",
+            "likely_cause": "No significant receive-window stall detected",
+            "explanation": "The receiver continued advertising available TCP receive-window capacity throughout the capture.",
+            "impact": "No significant TCP receive-window impact detected.",
+            "recommendation": "No receive-window action required."
+        }
+
+    # Currently stalled - receiver is advertising zero window right now
+    if currently_stalled:
+        return {
+            "status": "CURRENTLY STALLED",
+            "likely_cause": "Receiver-side processing/read delay",
+            "explanation": "The receiver is currently advertising a zero TCP receive window, indicating it cannot accept additional data at this moment. Normal transmission is being restricted by receiver-side flow control.",
+            "impact": "TCP transmission is currently stalled by receiver-side flow control. The sender cannot transmit new data until the window reopens.",
+            "recommendation": "Check receiver processing speed, application read delays, and receive-buffer availability immediately."
+        }
+
+    # Zero-window events occurred but recovery was detected
+    if stall_detected and recovery_detected:
+        return {
+            "status": "RECOVERED",
+            "likely_cause": "Receiver-side processing/read delay (now resolved)",
+            "explanation": f"The receiver advertised a zero TCP receive window {stall_episodes} time(s), indicating temporary inability to accept data. The receive window later reopened ({recovery_episodes} recovery episode(s) detected) and transmission recovered.",
+            "impact": f"TCP transmission was temporarily stalled by receiver-side flow control. Total stall duration: {metrics.get('total_stall_duration_sec', 0):.3f}s. Maximum single stall: {metrics.get('maximum_stall_duration_sec', 0):.3f}s.",
+            "recommendation": "Check receiver processing speed, application read delays, and receive-buffer sizing. Consider increasing socket receive buffer (SO_RCVBUF) if stalls are frequent."
+        }
+
+    # Zero-window detected but no recovery (edge case)
+    if stall_detected and not recovery_detected:
+        return {
+            "status": "STALL DETECTED (UNRESOLVED)",
+            "likely_cause": "Receiver-side processing/read delay",
+            "explanation": f"The receiver advertised a zero TCP receive window {stall_episodes} time(s), but no window reopening was detected in the capture. The stall may still be ongoing or the capture ended before recovery.",
+            "impact": "TCP transmission was stalled by receiver-side flow control. Recovery status unknown.",
+            "recommendation": "Verify if the receiver is still running and able to process data. Check for application hangs or buffer exhaustion."
+        }
+
+    # Fallback
+    return {
+        "status": "UNKNOWN",
+        "likely_cause": "Indeterminate",
+        "explanation": "Unable to determine root cause from available metrics.",
+        "impact": "Unknown.",
+        "recommendation": "Review raw packet capture for additional context."
+    }
+
+
+root_cause = determine_root_cause(
+    {
+        "zero_window_packets": zero_window_packet_count,
+        "stall_episodes": stall_episode_count,
+        "confirmed_probes": probe_count,
+        "probe_responses": probe_response_count,
+        "recovery_episodes": recovery_count,
+        "total_stall_duration_sec": round(total_stall_duration, 3),
+        "maximum_stall_duration_sec": round(maximum_stall_duration, 3),
+        "average_stall_duration_sec": round(average_stall_duration, 3)
+    },
+    {
+        "stall_detected": stall_episode_count > 0,
+        "recovery_detected": recovery_count > 0,
+        "currently_stalled": currently_stalled
+    }
+)
 
 # ---------------------------------------------------------
 # BUILD RESULT
@@ -462,11 +623,10 @@ analysis_result = {
             recovery_count > 0
         ),
 
-        "currently_stalled": currently_stalled,
-        "latest_receive_window": latest_receiver_window,
-        "latest_receive_window_timestamp_sec": latest_receiver_window_time,
-        "latest_receive_window_packet": latest_receiver_window_packet
+        "currently_stalled": currently_stalled
     },
+
+    "root_cause_analysis": root_cause,
 
     "timeline": timeline
 }
@@ -477,7 +637,7 @@ analysis_result = {
 # ---------------------------------------------------------
 
 os.makedirs(
-    os.path.dirname(RESULT_FILE),
+    os.path.dirname(RESULT_FILE) or ".",
     exist_ok=True
 )
 

@@ -7,18 +7,37 @@ let ANALYSIS = null;
    LOAD EXISTING ANALYSIS
    ============================================================ */
 
+
+  
 async function loadAnalysis() {
   try {
-    const response = await fetch(ANALYSIS_URL);
+    const response = await fetch(ANALYSIS_URL, {
+      cache: "no-store"
+    });
+
+    // Backend is reachable, but there is no saved analysis yet.
+    if (response.status === 404) {
+      ANALYSIS = null;
+      updateBackendStatus(true);
+      clearAnalysisView(
+        "No completed analysis is available. Run a capture to begin.",
+        "No analysis"
+      );
+
+      console.log("Backend connected. No analysis available yet.");
+      return false;
+    }
 
     if (!response.ok) {
       throw new Error(`FastAPI returned HTTP ${response.status}`);
     }
 
     const data = await response.json();
+
     if (!data || typeof data !== "object" || Array.isArray(data)) {
       throw new Error("The analysis response was not a valid JSON object.");
     }
+
     ANALYSIS = normalizeAnalysis(data);
 
     updateBackendStatus(true);
@@ -28,19 +47,28 @@ async function loadAnalysis() {
   } catch (error) {
     console.error("Unable to load analysis:", error);
     updateBackendStatus(false);
+    clearAnalysisView(
+      "Unable to retrieve analysis from the backend.",
+      "Connection error"
+    );
     showBackendError(error);
     return false;
   }
 }
 
+
 /* ============================================================
    RUN AUTOMATIC CAPTURE AND ANALYSIS THROUGH FASTAPI
    ============================================================ */
 
-async function runAnalysis() {
+async function runAnalysis(pauseSeconds) {
   try {
-    const response = await fetch(START_CAPTURE_URL, {
+    const url = pauseSeconds
+      ? `${START_CAPTURE_URL}?pause_seconds=${encodeURIComponent(pauseSeconds)}`
+      : START_CAPTURE_URL;
+    const response = await fetch(url, {
       method: "POST",
+      cache: "no-store",
       headers: {
         "Content-Type": "application/json"
       }
@@ -107,27 +135,12 @@ function normalizeAnalysis(data) {
   const events = data.events || {};
   const metrics = data.metrics || {};
   const state = data.state || {};
-  const latestReceiveWindow =
-    Number.isFinite(state.latest_receive_window) && state.latest_receive_window >= 0
-      ? state.latest_receive_window
-      : null;
-  const latestWindowStatus = latestReceiveWindow === null
-    ? "unknown"
-    : latestReceiveWindow === 0
-      ? "stalled"
-      : "available";
-  const currentlyStalled = latestWindowStatus === "stalled";
-  const latestReceiveWindowPacket = Number.isFinite(
-    state.latest_receive_window_packet
-  )
-    ? state.latest_receive_window_packet
-    : null;
 
   const connection = {
     sender: `${sender.ip || "Unknown"}:${sender.port || "?"}`,
     receiver: `${receiver.ip || "Unknown"}:${receiver.port || "?"}`,
     protocol: "TCP",
-    currentlyStalled
+    currentlyStalled: Boolean(state.currently_stalled)
   };
 
   const pcap = {
@@ -234,7 +247,7 @@ function normalizeAnalysis(data) {
       return {
         value: Number.isFinite(timingValue) && timingValue >= 0
           ? formatEventDuration(timingValue)
-          : event.event === "ZERO_WINDOW_START" && currentlyStalled
+          : event.event === "ZERO_WINDOW_START" && state.currently_stalled
             ? "Ongoing"
             : undefined,
         label: timingLabel
@@ -261,26 +274,37 @@ function normalizeAnalysis(data) {
   // collection empty instead of inferring events from packet-number thresholds.
   const flaps = [];
 
-  const final = {
-    packet: latestReceiveWindowPacket ?? "—",
-    type: latestWindowStatus === "stalled"
-      ? "alert"
-      : latestWindowStatus === "available"
-        ? "ok"
-        : "response",
-    tagLabel: "Final capture state",
-    label: latestWindowStatus === "stalled"
-      ? "Window Stalled"
-      : latestWindowStatus === "available"
-        ? `Window Available — ${latestReceiveWindow}`
-        : "Status Unknown",
-    window: latestReceiveWindow ?? undefined,
-    detail: latestWindowStatus === "stalled"
-      ? `Latest receiver-to-sender ACK advertisement at packet ${latestReceiveWindowPacket ?? "unknown"} had a zero TCP window.`
-      : latestWindowStatus === "available"
-        ? `Latest receiver-to-sender ACK advertisement at packet ${latestReceiveWindowPacket ?? "unknown"} had TCP window ${latestReceiveWindow}.`
-        : "No reliable receiver-advertised TCP window was present in the analysis."
+  let final = {
+    packet: 0,
+    type: "alert",
+    label: "No final event",
+    detail: ""
   };
+
+  if (backendTimeline.length > 0) {
+    const last = backendTimeline[backendTimeline.length - 1];
+    const reopened = last.event === "WINDOW_REOPENED";
+
+    final = {
+      packet: last.packet,
+      type: reopened ? "ok" : "alert",
+      label: reopened
+        ? "Window reopened"
+        : "Zero window (ongoing)",
+      window: last.window,
+      seq: last.seq,
+      ack: last.ack,
+      payload: Number.isFinite(last.payload_length)
+        ? `${last.payload_length} byte${last.payload_length === 1 ? "" : "s"}`
+        : undefined,
+      duration: Number.isFinite(last.stall_duration)
+        ? `${String(last.stall_duration)}s`
+        : undefined,
+      detail: reopened
+        ? "The capture ended after the receive window reopened."
+        : "The capture ended while the connection was still in a zero-window state."
+    };
+  }
 
   const stallEpisodeDurations = [];
 
@@ -313,16 +337,9 @@ function normalizeAnalysis(data) {
     state: {
       stallDetected: Boolean(state.stall_detected),
       recoveryDetected: Boolean(state.recovery_detected),
-      currentlyStalled,
-      currentWindowStatus: latestWindowStatus,
-      latestReceiveWindow,
-      latestReceiveWindowPacket,
-      latestReceiveWindowTimestamp: Number.isFinite(
-        state.latest_receive_window_timestamp_sec
-      )
-        ? state.latest_receive_window_timestamp_sec
-        : null
-    }
+      currentlyStalled: Boolean(state.currently_stalled)
+    },
+    root_cause_analysis: data.root_cause_analysis || null
   };
 }
 
@@ -391,6 +408,65 @@ function showBackendError(error) {
   }
 
   console.error("TCP-ZeroGuard backend error:", error);
+}
+
+function clearAnalysisView(message, status = "No analysis") {
+  ANALYSIS = null;
+  tableRows = [];
+  activeFilter = "all";
+  searchTerm = "";
+  currentPage = 1;
+
+  [
+    "metric-grid",
+    "timeline-list",
+    "timeline-legend",
+    "stall-stats",
+    "stall-chart",
+    "event-filters",
+    "packet-table-body",
+    "pcap-grid"
+  ].forEach(id => {
+    const element = document.getElementById(id);
+    if (element) element.replaceChildren();
+  });
+
+  const state = document.getElementById("hero-state");
+  const description = document.getElementById("hero-description");
+  const badge = document.getElementById("hero-badge");
+  const gauge = document.getElementById("gauge-level");
+  const gaugeValue = document.getElementById("gauge-value");
+  const packetSearch = document.getElementById("packet-search");
+  const tableCount = document.getElementById("table-count");
+  const pager = document.getElementById("pager-label");
+  const captureStatus = document.querySelector(".capture-status");
+  const captureDot = document.querySelector(".capture-pill .dot");
+
+  if (state) state.textContent = "No current analysis";
+  if (description) description.textContent = message;
+  if (badge) badge.textContent = "NO DATA";
+  if (gauge) {
+    gauge.style.width = "0%";
+    gauge.style.background = "";
+  }
+  if (gaugeValue) gaugeValue.textContent = "—";
+  if (packetSearch) packetSearch.value = "";
+  if (tableCount) tableCount.textContent = "0 rows";
+  if (pager) pager.textContent = "Page 0 of 0";
+  if (captureStatus) captureStatus.textContent = status;
+  if (captureDot) {
+    captureDot.classList.remove("dot-ok");
+    captureDot.classList.add("dot-alert");
+  }
+
+  document.querySelectorAll(".channel-node-addr").forEach(element => {
+    element.textContent = "—";
+  });
+
+  ["pager-prev", "pager-next"].forEach(id => {
+    const button = document.getElementById(id);
+    if (button) button.disabled = true;
+  });
 }
 
 /* ============================================================
@@ -570,10 +646,6 @@ function renderCascades() {
     ? ANALYSIS.timeline[0].packet
     : "—";
 
-  const latestRecovery = [...ANALYSIS.timeline]
-    .reverse()
-    .find(event => event.eventCode === "WINDOW_REOPENED");
-
   renderCascade("cascade-recovery", [
     {
       label: `Stall detected — packet ${firstPacket}`,
@@ -588,50 +660,26 @@ function renderCascades() {
       label: `${ANALYSIS.metrics.probeResponses} responses received`,
       tone: "response"
     },
-    {
-      label: latestRecovery
-        ? `Window reopened — ${latestRecovery.window} bytes`
-        : "No window-reopened event observed",
-      tone: latestRecovery ? "ok" : "alert"
-    }
+    { label: "Window reopened — 4096 bytes", tone: "ok" }
   ]);
 
-  const recoveryDescription = document.getElementById(
-    "cascade-recovery-description"
-  );
-  if (recoveryDescription) {
-    recoveryDescription.textContent = latestRecovery
-      ? "Historical recovery event from the capture; final state is shown separately below."
-      : "No window-reopened event is present in this capture.";
+  // Update recovery time (longest stall) and current state
+  const maxStall = ANALYSIS.metrics.maximumStallDuration || 0;
+  const isStalled = ANALYSIS.state?.currentlyStalled || false;
+
+  const recoveryTimeEl = document.getElementById("recovery-time-value");
+  if (recoveryTimeEl) {
+    recoveryTimeEl.textContent = maxStall.toFixed(3) + "s";
   }
 
-  const recoveryDuration = document.getElementById("recovery-time-value");
-  if (recoveryDuration) {
-    recoveryDuration.textContent = ANALYSIS.metrics.recoveryEpisodes > 0
-      ? `${ANALYSIS.metrics.maximumStallDuration.toFixed(3)} s`
-      : "—";
+  const stateChipEl = document.querySelector(".recovery-state .state-chip");
+  const stateLabelEl = document.querySelector(".recovery-state .foot-label");
+  if (stateChipEl) {
+    stateChipEl.textContent = isStalled ? "Zero window" : "Window open";
+    stateChipEl.className = "state-chip " + (isStalled ? "state-chip-alert" : "state-chip-ok");
   }
-
-  const finalState = document.getElementById("final-flow-state");
-  if (finalState) {
-    const status = ANALYSIS.state.currentWindowStatus;
-    finalState.classList.remove(
-      "state-chip-alert",
-      "state-chip-ok",
-      "state-chip-unknown"
-    );
-    finalState.classList.add(
-      status === "stalled"
-        ? "state-chip-alert"
-        : status === "available"
-          ? "state-chip-ok"
-          : "state-chip-unknown"
-    );
-    finalState.textContent = status === "stalled"
-      ? "Zero Window"
-      : status === "available"
-        ? `Window Available — ${ANALYSIS.state.latestReceiveWindow}`
-        : "Status Unknown";
+  if (stateLabelEl) {
+    stateLabelEl.textContent = "Current state at end of capture";
   }
 }
 
@@ -685,6 +733,7 @@ function buildFullEventList() {
       packet: end,
       type: "ok",
       label: "Window reopened",
+      window: 4096,
       detail: `Buffer cleared quickly — short flap #${index + 1}.`
     });
   });
@@ -735,7 +784,7 @@ function timelineRowHTML(event) {
           </span>
 
           <span class="timeline-tag tag-${event.type}">
-            ${event.tagLabel || TONE_LABEL[event.type]}
+            ${TONE_LABEL[event.type]}
           </span>
 
           <span class="timeline-label">
@@ -1255,44 +1304,29 @@ function renderPcap() {
    ============================================================ */
 
 function renderHero() {
-  const windowValue = ANALYSIS.state.latestReceiveWindow;
-  const status = ANALYSIS.state.currentWindowStatus;
+  const stalled = ANALYSIS.state.currentlyStalled;
 
-  const hero = document.querySelector(".hero");
   const state = document.getElementById("hero-state");
   const description = document.getElementById("hero-description");
   const badge = document.getElementById("hero-badge");
 
-  if (hero) {
-    hero.classList.remove(
-      "hero-window-stalled",
-      "hero-window-available",
-      "hero-window-unknown"
-    );
-    hero.classList.add(`hero-window-${status}`);
-  }
-
   if (state) {
-    state.textContent = status === "stalled"
-      ? "Window Stalled"
-      : status === "available"
-        ? "Window Available"
-        : "Status Unknown";
+    state.textContent = stalled
+      ? "Currently stalled"
+      : "Window available";
   }
 
   if (description) {
-    description.textContent = status === "stalled"
-      ? "The receiver's latest TCP window advertisement is zero. Normal sender transmission must wait for receive capacity to return."
-      : status === "available"
-        ? `The receiver's latest TCP window advertisement is ${windowValue}, so receive capacity is available.`
-        : "No reliable current TCP receive-window advertisement is available in this analysis.";
+    description.textContent = stalled
+      ? "Receiver advertised a zero TCP receive window. The sender has halted normal segment transmission and is holding unacknowledged data."
+      : "The receiver has available buffer space and can accept incoming TCP data. Normal data transmission can continue.";
   }
 
   if (badge) {
     badge.innerHTML = `
       <span class="pulse-ring"></span>
       <span class="pulse-dot"></span>
-      ${status === "stalled" ? "STALLED" : status === "available" ? "ACTIVE" : "UNKNOWN"}
+      ${stalled ? "STALLED" : "ACTIVE"}
     `;
   }
 
@@ -1316,17 +1350,11 @@ function renderHero() {
   const value = document.getElementById("gauge-value");
 
   if (level && value) {
-    level.style.width = status === "unknown"
-      ? "0%"
-      : status === "stalled"
-        ? "0%"
-        : "100%";
-    level.style.background = status === "stalled"
-      ? "var(--alert)"
-      : status === "available"
-        ? "var(--ok)"
-        : "";
-    value.textContent = windowValue === null ? "—" : windowValue;
+    const windowValue = stalled ? 0 : 4096;
+
+    level.style.width = stalled ? "0%" : "100%";
+    level.style.background = stalled ? "var(--alert)" : "";
+    value.textContent = windowValue;
   }
 }
 
@@ -1408,6 +1436,7 @@ function initNav() {
 
 function initAnalyzeButton() {
   const button = document.getElementById("analyze-btn");
+  const pauseSelect = document.getElementById("pause-select");
 
   if (!button) {
     return;
@@ -1419,13 +1448,18 @@ function initAnalyzeButton() {
     }
 
     const original = button.innerHTML;
+    const pauseSeconds = pauseSelect ? pauseSelect.value : "";
+
+    clearAnalysisView(
+      "A fresh capture is running. Results will appear when it completes.",
+      "Capturing..."
+    );
 
     button.classList.add("is-running");
     button.disabled = true;
 
     button.innerHTML = `
       <svg
-        class="loading-spinner"
         width="15"
         height="15"
         viewBox="0 0 16 16"
@@ -1444,17 +1478,12 @@ function initAnalyzeButton() {
       Capturing & analyzing…
     `;
 
-    const spinner = button.querySelector(".loading-spinner");
-    spinner?.classList.add("is-spinning");
-
-    let failure = null;
-
     try {
       console.log(
         "Starting TCP-ZeroGuard automatic capture and analysis..."
       );
 
-      const result = await runAnalysis();
+      const result = await runAnalysis(pauseSeconds);
 
       if (result.success) {
         console.log(
@@ -1463,20 +1492,25 @@ function initAnalyzeButton() {
 
         renderAll();
       } else {
-        failure = result.error;
+        clearAnalysisView(
+          "The latest capture failed. No previous results are being shown.",
+          "Capture failed"
+        );
+        showAnalysisError(result.error);
       }
     } catch (error) {
       console.error("Capture and analysis failed:", error);
-      failure = error;
+
+      clearAnalysisView(
+        "The latest capture failed. No previous results are being shown.",
+        "Capture failed"
+      );
+
+      showAnalysisError(error);
     } finally {
-      spinner?.classList.remove("is-spinning");
       button.classList.remove("is-running");
       button.disabled = false;
       button.innerHTML = original;
-    }
-
-    if (failure) {
-      showAnalysisError(failure);
     }
   });
 }
@@ -1543,9 +1577,121 @@ function initTooltips() {
   });
 }
 
+function initPdfDownload() {
+  const btn = document.getElementById("download-pdf-btn");
+  if (!btn) return;
+
+  btn.addEventListener("click", async () => {
+    if (btn.disabled) return;
+
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.6" stroke-dasharray="28" stroke-dashoffset="10"/>
+      </svg>
+      Generating...
+    `;
+
+    try {
+      const response = await fetch(`${API_BASE}/api/report/pdf`, { cache: "no-store" });
+
+      if (response.status === 404) {
+        throw new Error("No completed analysis available. Run an analysis first.");
+      }
+
+      if (!response.ok) {
+        let msg = "Failed to generate PDF report.";
+        try {
+          const err = await response.json();
+          if (err.detail) msg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
+        } catch {}
+        throw new Error(msg);
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = response.headers.get("Content-Disposition")?.match(/filename="(.+)"/)?.[1] || `TCP-ZeroGuard-Report-${new Date().toISOString().slice(0,19).replace(/[:.]/g,"-")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+    } catch (error) {
+      console.error("PDF download failed:", error);
+      window.alert(`PDF download failed:\n\n${error.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = original;
+    }
+  });
+}
+
 /* ============================================================
    RENDER EVERYTHING
    ============================================================ */
+
+function renderDiagnosis() {
+  const el = document.getElementById("diagnosis-panel");
+  if (!el) return;
+
+  const rootCause = ANALYSIS?.root_cause_analysis;
+  if (!rootCause) {
+    el.innerHTML = "";
+    return;
+  }
+
+  const status = rootCause.status || "UNKNOWN";
+  const likelyCause = rootCause.likely_cause || "Indeterminate";
+  const explanation = rootCause.explanation || "";
+  const impact = rootCause.impact || "";
+  const recommendation = rootCause.recommendation || "";
+
+  const statusClassMap = {
+    "HEALTHY": "diagnosis-status-healthy",
+    "CURRENTLY STALLED": "diagnosis-status-stalled",
+    "RECOVERED": "diagnosis-status-recovered",
+    "STALL DETECTED (UNRESOLVED)": "diagnosis-status-unresolved",
+    "UNKNOWN": "diagnosis-status-unknown"
+  };
+  const statusClass = statusClassMap[status] || "diagnosis-status-unknown";
+
+  el.innerHTML = `
+    <div class="diagnosis-head">
+      <div class="diagnosis-icon">
+        <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M8 4v5M8 11v.01" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </div>
+      <h3 class="diagnosis-title">Why is the connection slow?</h3>
+    </div>
+    <div class="diagnosis-grid">
+      <div class="diagnosis-field">
+        <div class="diagnosis-field-label">Status</div>
+        <div class="diagnosis-field-value">
+          <span class="diagnosis-status ${statusClass}">${status}</span>
+        </div>
+      </div>
+      <div class="diagnosis-field">
+        <div class="diagnosis-field-label">Likely Cause</div>
+        <div class="diagnosis-field-value">${likelyCause}</div>
+      </div>
+      <div class="diagnosis-field">
+        <div class="diagnosis-field-label">Explanation</div>
+        <div class="diagnosis-field-value">${explanation}</div>
+      </div>
+      <div class="diagnosis-field">
+        <div class="diagnosis-field-label">Impact</div>
+        <div class="diagnosis-field-value">${impact}</div>
+      </div>
+      <div class="diagnosis-field">
+        <div class="diagnosis-field-label">Recommendation</div>
+        <div class="diagnosis-field-value">${recommendation}</div>
+      </div>
+    </div>
+  `;
+}
 
 function renderAll() {
   if (!ANALYSIS) {
@@ -1560,6 +1706,7 @@ function renderAll() {
   renderStallStats();
   renderStallChart();
   renderPcap();
+  renderDiagnosis();
 
   tableRows = buildTableRows();
   activeFilter = "all";
@@ -1588,6 +1735,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initNav();
   initAnalyzeButton();
   initTooltips();
+  initPdfDownload();
 
   if (await loadAnalysis()) {
     renderAll();

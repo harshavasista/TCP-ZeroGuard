@@ -70,6 +70,11 @@
       </div>
       <div class="topbar-actions">
         <div class="capture-pill"><span class="dot dot-alert"></span><span class="capture-status">Checking backend</span></div>
+        <select class="pause-select" id="pause-select" title="Pause duration in seconds. Each run varies ±20% for different results.">
+          <option value="5">5s (varies ~4-6s)</option>
+          <option value="10">10s (varies ~8-12s)</option>
+          <option value="15">15s (varies ~12-18s)</option>
+        </select>
         <button class="btn-primary" id="analyze-btn">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 2v5.2M8 2 5.4 4.6M8 2l2.6 2.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 9.5v2.8c0 .94.76 1.7 1.7 1.7h6.6c.94 0 1.7-.76 1.7-1.7V9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           Analyze PCAP
@@ -82,17 +87,17 @@
       <!-- ============ PAGE: DASHBOARD ============ -->
       <section class="page active" id="page-dashboard">
 
-        <div class="hero hero-window-unknown">
+        <div class="hero">
           <div class="hero-top">
             <div class="hero-heading">
               <span class="hero-kicker">TCP flow status</span>
-              <h2 id="hero-state">Status Unknown</h2>
-              <p id="hero-description">No reliable current TCP receive-window advertisement is available in this analysis.</p>
+              <h2 id="hero-state">Currently stalled</h2>
+              <p id="hero-description">The receiver has available buffer space and can accept incoming TCP data. Normal data transmission can continue.</p>
             </div>
             <div class="hero-badge" id="hero-badge">
               <span class="pulse-ring"></span>
               <span class="pulse-dot"></span>
-              UNKNOWN
+              STALLED
             </div>
           </div>
 
@@ -108,7 +113,7 @@
               </div>
               <div class="channel-gauge">
                 <div class="gauge-track"><div class="gauge-level" id="gauge-level"></div></div>
-                <div class="gauge-readout"><span id="gauge-value">0</span> TCP window</div>
+                <div class="gauge-readout"><span id="gauge-value">0</span> B window</div>
               </div>
               <div class="channel-proto">TCP</div>
             </div>
@@ -121,6 +126,8 @@
         </div>
 
         <div class="metric-grid" id="metric-grid"></div>
+
+        <div class="panel diagnosis-panel" id="diagnosis-panel"></div>
 
       </section>
 
@@ -138,17 +145,17 @@
         <div class="panel">
           <div class="panel-head">
             <h3>Recovery sequence</h3>
-            <p id="cascade-recovery-description">Historical recovery events are separate from the final capture state.</p>
+            <p>Probe-and-response cycle that reopened the window after the longest recorded stall.</p>
           </div>
           <div class="cascade cascade-recovery" id="cascade-recovery"></div>
           <div class="recovery-foot">
             <div class="recovery-time">
-              <span class="recovery-time-value" id="recovery-time-value">—</span>
+              <span class="recovery-time-value" id="recovery-time-value">9.969s</span>
               <span class="recovery-time-label">time to recovery</span>
             </div>
             <div class="recovery-state">
               <span class="foot-label">Current state at end of capture</span>
-              <span class="state-chip state-chip-unknown" id="final-flow-state">Status Unknown</span>
+              <span class="state-chip state-chip-alert" id="recovery-state-chip">Zero window</span>
             </div>
           </div>
         </div>
@@ -238,6 +245,13 @@
               <span class="state-chip state-chip-ok">Completed</span>
             </div>
             <div class="pcap-progress-track"><div class="pcap-progress-fill"></div></div>
+            <button class="btn-pdf" id="download-pdf-btn" title="Download PDF report of this analysis">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M8 2v10M8 2l-4 4M8 2l4 4M3 12h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M8 14v-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+              Download PDF Report
+            </button>
           </div>
         </div>
 

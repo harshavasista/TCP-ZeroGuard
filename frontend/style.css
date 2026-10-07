@@ -120,6 +120,16 @@ input{font-family:inherit;}
   padding:6px 12px; border:1px solid var(--line); border-radius:20px;
 }
 
+.pause-select{
+  background:var(--panel); color:var(--text);
+  border:1px solid var(--line); border-radius:var(--radius);
+  padding:8px 12px; font-size:12.5px; font-weight:500;
+  min-width:140px; cursor:pointer;
+  transition:border-color .15s ease;
+}
+.pause-select:hover{border-color:var(--response);}
+.pause-select:focus{outline:none; border-color:var(--response); box-shadow:0 0 0 2px var(--response-soft);}
+
 .btn-primary{
   display:flex; align-items:center; gap:7px;
   background:var(--response); color:#0A0E14;
@@ -130,13 +140,21 @@ input{font-family:inherit;}
 .btn-primary:hover{filter:brightness(1.1);}
 .btn-primary:active{transform:translateY(1px);}
 .btn-primary.is-running{filter:brightness(.85); cursor:progress;}
-.loading-spinner{display:block; flex:0 0 auto; transform-box:fill-box; transform-origin:center; visibility:visible;}
-.loading-spinner.is-spinning{animation:spin .8s linear infinite;}
-@keyframes spin{
-  from{transform:rotate(0deg);}
-  to{transform:rotate(360deg);}
+.btn-primary.is-running svg{animation:spin 1s linear infinite; transform-origin:center; transform-box:fill-box;}
+@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+
+.btn-pdf{
+  display:flex; align-items:center; gap:8px;
+  background:var(--panel-2); color:var(--response);
+  border:1px solid var(--response); border-radius:var(--radius);
+  padding:10px 18px; font-size:13px; font-weight:600;
+  margin:16px auto 0; width:fit-content;
+  transition:background .15s ease, color .15s ease, border-color .15s ease;
 }
-@media (prefers-reduced-motion:reduce){.loading-spinner.is-spinning{animation-duration:1.6s;}}
+.btn-pdf:hover{background:var(--response); color:#0A0E14; border-color:var(--response);}
+.btn-pdf:active{transform:translateY(1px);}
+.btn-pdf:disabled{opacity:.5; cursor:not-allowed;}
+.btn-pdf svg{flex-shrink:0;}
 
 .content{padding:26px 28px 48px; max-width:1180px;}
 
@@ -157,12 +175,6 @@ input{font-family:inherit;}
 .hero-kicker{font-size:12px; color:var(--text-faint); font-weight:500; letter-spacing:.3px;}
 .hero-heading h2{font-size:24px; font-weight:600; margin:5px 0 9px; color:var(--alert);}
 .hero-heading p{font-size:13.5px; color:var(--text-dim); max-width:480px;}
-.hero-window-available .hero-heading h2{color:var(--ok);}
-.hero-window-available .hero-badge{background:var(--ok-soft); color:var(--ok); border-color:rgba(76,195,138,.35);}
-.hero-window-available .hero-badge .pulse-dot,.hero-window-available .hero-badge .pulse-ring{background:var(--ok);}
-.hero-window-unknown .hero-heading h2{color:var(--text-dim);}
-.hero-window-unknown .hero-badge{background:var(--panel-2); color:var(--text-dim); border-color:var(--line);}
-.hero-window-unknown .hero-badge .pulse-dot,.hero-window-unknown .hero-badge .pulse-ring{background:var(--text-faint);}
 
 .hero-badge{
   position:relative;
@@ -277,7 +289,6 @@ input{font-family:inherit;}
 }
 .state-chip-alert{background:var(--alert-soft); color:var(--alert); border:1px solid rgba(226,84,61,.3);}
 .state-chip-ok{background:var(--ok-soft); color:var(--ok); border:1px solid rgba(76,195,138,.3);}
-.state-chip-unknown{background:var(--panel-2); color:var(--text-dim); border:1px solid var(--line);}
 
 /* ============================================================
    Timeline
@@ -493,3 +504,53 @@ input{font-family:inherit;}
   .recovery-foot{flex-direction:column; align-items:flex-start; gap:14px;}
   .recovery-state{align-items:flex-start;}
 }
+
+/* ============================================================
+   Diagnosis panel — "Why is the connection slow?"
+   ============================================================ */
+.diagnosis-panel{
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius-lg);
+  padding:22px 24px 24px; margin-bottom:18px;
+}
+.diagnosis-panel:empty{display:none;}
+
+.diagnosis-head{
+  display:flex; align-items:center; gap:12px; margin-bottom:18px;
+}
+.diagnosis-icon{
+  width:32px; height:32px; border-radius:var(--radius);
+  display:flex; align-items:center; justify-content:center;
+  background:var(--alert-soft); color:var(--alert);
+  border:1px solid rgba(226,84,61,.3);
+}
+.diagnosis-icon svg{width:16px; height:16px;}
+
+.diagnosis-title{font-size:15.5px; font-weight:600;}
+
+.diagnosis-grid{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px;
+}
+
+.diagnosis-field{
+  background:var(--panel-2); border:1px solid var(--line); border-radius:var(--radius);
+  padding:14px 16px; transition:border-color .15s ease;
+}
+.diagnosis-field:hover{border-color:var(--line-soft);}
+
+.diagnosis-field-label{
+  font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.5px;
+  font-weight:600; margin-bottom:6px;
+}
+.diagnosis-field-value{
+  font-size:13px; color:var(--text); line-height:1.5;
+}
+
+.diagnosis-status{
+  font-family:var(--font-mono); font-size:12px; font-weight:600; letter-spacing:.3px;
+  padding:2px 8px; border-radius:8px; display:inline-block;
+}
+.diagnosis-status-healthy{background:var(--ok-soft); color:var(--ok);}
+.diagnosis-status-stalled{background:var(--alert-soft); color:var(--alert);}
+.diagnosis-status-recovered{background:var(--response-soft); color:var(--response);}
+.diagnosis-status-unresolved{background:var(--probe-soft); color:var(--probe);}
+.diagnosis-status-unknown{background:var(--line); color:var(--text-dim);}
